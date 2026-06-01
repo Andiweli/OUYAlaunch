@@ -5,6 +5,7 @@ import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
+import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.util.Log;
@@ -16,20 +17,17 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Enumeration;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Set;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
 /**
- * Scans launchable apps and builds a cache of OUYA-compatible entries, identified by the presence
- * of an "ouya_icon.png" inside the APK. Soft rule: if both a package and its ".launcher" twin exist,
- * the base package (without ".launcher") is ignored for the icon scan and only the ".launcher" app
- * is considered. This avoids duplicate entries and ensures the correct OUYA icon is used.
+ * Scans launchable apps and builds a cache of OUYA-compatible entries, identified by
+ * the presence of an OUYA tile icon. The icon is accepted either as an APK file
+ * named ouya_icon.* or as an Android drawable/mipmap resource named ouya_icon.
  *
  * NOTE: Keep Java 7 compatible (no lambdas).
  */
@@ -37,7 +35,6 @@ public class AppScanner {
 
     private static final String TAG = "AppScanner";
     private static final String ICON_FILE_NAME = "ouya_icon.png";
-    private static final String LAUNCHER_SUFFIX = ".launcher";
 
     /** Build the full list of OUYA-compatible apps (has ouya_icon.png). */
     public static List<AppEntry> buildCache(Context ctx) {
@@ -45,11 +42,18 @@ public class AppScanner {
         PackageManager pm = ctx.getPackageManager();
 
         try {
-            // 1) Get all launchable activities
+            // 1) Get all launchable activities. OUYA games sometimes expose only
+            // the OUYA GAME category, while normal Android apps use LAUNCHER.
+            List<ResolveInfo> infos = new ArrayList<ResolveInfo>();
             Intent intent = new Intent(Intent.ACTION_MAIN, null);
             intent.addCategory(Intent.CATEGORY_LAUNCHER);
-            List<ResolveInfo> infos = pm.queryIntentActivities(intent, 0);
-            if (infos == null) infos = new ArrayList<ResolveInfo>();
+            List<ResolveInfo> launcherInfos = pm.queryIntentActivities(intent, 0);
+            if (launcherInfos != null) infos.addAll(launcherInfos);
+
+            Intent ouyaIntent = new Intent(Intent.ACTION_MAIN, null);
+            ouyaIntent.addCategory("tv.ouya.intent.category.GAME");
+            List<ResolveInfo> ouyaInfos = pm.queryIntentActivities(ouyaIntent, 0);
+            if (ouyaInfos != null) infos.addAll(ouyaInfos);
 
             // 2) Collect unique package names
             Set<String> packages = new HashSet<String>();
@@ -62,52 +66,24 @@ public class AppScanner {
                 }
             }
 
-            // 3) Compute skip set for base packages when a ".launcher" twin exists
-            Set<String> skipBase = new HashSet<String>();
-            for (String pkg : packages) {
-                if (pkg.endsWith(LAUNCHER_SUFFIX)) {
-                    String base = pkg.substring(0, pkg.length() - LAUNCHER_SUFFIX.length());
-                    if (packages.contains(base)) {
-                        skipBase.add(base);
-                    }
-                }
-            }
-            if (!skipBase.isEmpty()) {
-                Log.i(TAG, "Launcher-pairs detected, will ignore bases for icon scan: " + skipBase);
-            }
-
-            // 4) Prepare icon cache dir
+            // 3) Prepare icon cache dir
             File iconDir = new File(ctx.getFilesDir(), "icons");
             if (!iconDir.exists()) {
                 //noinspection ResultOfMethodCallIgnored
                 iconDir.mkdirs();
             }
 
-            // 5) Iterate packages, apply soft rule, look for ouya_icon.png, and cache
+            // 4) Iterate packages, look for ouya_icon.png/resource, and cache.
             for (String pkg : packages) {
-                // Soft rule: if base is paired with ".launcher", skip base
-                if (skipBase.contains(pkg)) {
-                    Log.d(TAG, "Skip base package due to .launcher twin: " + pkg);
-                    continue;
-                }
-
                 try {
                     ApplicationInfo ai = pm.getApplicationInfo(pkg, 0);
                     if (ai == null || ai.sourceDir == null) continue;
 
-                    // Search inside APK zip for ouya_icon.png (any density path)
-                    IconMatch match = findOuyaIconInApk(ai.sourceDir);
-                    if (match == null) {
+                    Bitmap bmp = decodeOuyaIcon(ctx, pkg, ai);
+                    if (bmp == null) {
                         // No OUYA icon → not considered OUYA-compatible
                         continue;
                     }
-
-                    // Decode and cache icon file
-                    InputStream is = match.open();
-                    if (is == null) continue;
-                    Bitmap bmp = BitmapFactory.decodeStream(is);
-                    is.close();
-                    if (bmp == null) continue;
 
                     File outPng = new File(iconDir, pkg + ".png");
                     FileOutputStream fos = new FileOutputStream(outPng);
@@ -128,7 +104,7 @@ public class AppScanner {
 
                     out.add(e);
 
-                    Log.d(TAG, "Added OUYA app: " + pkg + " (" + title + "), icon=" + match.entryName);
+                    Log.d(TAG, "Added OUYA app: " + pkg + " (" + title + "), icon cached");
                 } catch (Throwable perApp) {
                     Log.w(TAG, "Failed scanning " + pkg + ": " + perApp.getMessage());
                 }
@@ -147,6 +123,43 @@ public class AppScanner {
             }
         });
         return out;
+    }
+
+
+    /** Decode ouya_icon either from the packaged APK file or from Android resources. */
+    private static Bitmap decodeOuyaIcon(Context ctx, String pkg, ApplicationInfo ai) {
+        Bitmap bmp = null;
+
+        if (ai != null && ai.sourceDir != null) {
+            IconMatch match = findOuyaIconInApk(ai.sourceDir);
+            if (match != null) {
+                InputStream is = null;
+                try {
+                    is = match.open();
+                    if (is != null) bmp = BitmapFactory.decodeStream(is);
+                } catch (Throwable t) {
+                    Log.w(TAG, "APK ouya_icon decode failed for " + pkg + ": " + t.getMessage());
+                } finally {
+                    try { if (is != null) is.close(); } catch (Throwable ignore) {}
+                }
+                if (bmp != null) return bmp;
+            }
+        }
+
+        try {
+            Context appCtx = ctx.createPackageContext(pkg, Context.CONTEXT_IGNORE_SECURITY);
+            Resources res = appCtx.getResources();
+            int id = res.getIdentifier("ouya_icon", "drawable", pkg);
+            if (id == 0) id = res.getIdentifier("ouya_icon", "mipmap", pkg);
+            if (id != 0) {
+                bmp = BitmapFactory.decodeResource(res, id);
+                if (bmp != null) return bmp;
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "Resource ouya_icon lookup failed for " + pkg + ": " + t.getMessage());
+        }
+
+        return null;
     }
 
     /** Represents a lazy-open match inside the APK. */
@@ -186,7 +199,9 @@ public class AppScanner {
                 String name = ze.getName();
                 if (name == null) continue;
                 String lower = name.toLowerCase(Locale.US);
-                if (lower.endsWith("/" + ICON_FILE_NAME) || lower.equals(ICON_FILE_NAME)) {
+                if (lower.endsWith("/" + ICON_FILE_NAME) || lower.equals(ICON_FILE_NAME)
+                        || lower.endsWith("/ouya_icon.webp") || lower.endsWith("/ouya_icon.jpg")
+                        || lower.endsWith("/ouya_icon.jpeg")) {
                     candidates.add(name);
                 }
             }

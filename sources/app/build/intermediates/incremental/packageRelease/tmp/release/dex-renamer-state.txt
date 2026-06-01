@@ -1,0 +1,4 @@
+#Mon Jun 01 16:38:37 CEST 2026
+base.0=E\:\\Development\\Android\\OUYAlaunch\\OUYAlaunch_1.7.2\\app\\build\\intermediates\\dex\\release\\mergeDexRelease\\classes.dex
+path.0=classes.dex
+renamed.0=classes.dex

@@ -10,6 +10,7 @@ import android.graphics.Color;
 import android.graphics.PorterDuff;
 import android.os.AsyncTask;
 import android.os.Bundle;
+import android.content.SharedPreferences;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 import android.net.wifi.WifiInfo;
@@ -38,6 +39,10 @@ import android.os.Handler;
 public class MainActivity extends AppCompatActivity implements AppAdapter.OnAppClickListener {
 
     public static final List<String> GENRES = Arrays.asList("Favorites", "Casual", "Action", "Racing", "Simulation", "RPG", "Apps");
+
+    private static final String STATE_PREFS = "ouyalaunch_state";
+    private static final String KEY_PACKAGE_RESCAN_PENDING = "package_rescan_pending";
+    private static final String KEY_LAST_SCAN_FINISHED_AT = "last_scan_finished_at";
 
     private RecyclerView recycler;
     private View overlayLoading;
@@ -69,6 +74,17 @@ public class MainActivity extends AppCompatActivity implements AppAdapter.OnAppC
     private List<AppEntry> allApps = new ArrayList<>();
     private List<List<AppEntry>> tabLists;
     private boolean[] tabDirty;
+    private boolean scanInProgress = false;
+    private boolean pendingForegroundRescan = false;
+
+    private static final long PACKAGE_RESCAN_FOREGROUND_DELAY_MS = 1500L;
+    private final Handler rescanHandler = new Handler();
+    private final Runnable foregroundPackageRescanRunnable = new Runnable() {
+        @Override
+        public void run() {
+            runPendingPackageRescanIfVisible();
+        }
+    };
 
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
@@ -114,20 +130,16 @@ public class MainActivity extends AppCompatActivity implements AppAdapter.OnAppC
 
         setupTabs();
 
-        // first run?
+        // First run: build the cache once. After that OUYAlaunch never rescans
+        // automatically on package changes; only the manual L2+R2 rescan updates the cache.
+        clearPackageRescanPending();
         if (!dataStore.isCacheBuilt()) {
-            new ScanTask().execute();
+            startInitialScanIfIdle();
         } else {
             allApps = dataStore.load();
             markAllTabsDirty();
             adapter.setData(filterByCurrentTab(allApps));
-            recycler.post(() -> {
-                // Prüfen, ob überhaupt ein View fokussiert ist
-                if (recycler.getFocusedChild() == null && recycler.getChildCount() > 0) {
-                    recycler.getChildAt(0).requestFocus();
-                }
-            });
-
+            focusFirstTileIfNeeded();
         }
 
         // 🟠 Sanfter Fade-In-Effekt beim Appstart
@@ -204,6 +216,77 @@ public class MainActivity extends AppCompatActivity implements AppAdapter.OnAppC
         recycler.setPadding(sidePadPx, top, sidePadPx, bottom);
 
         recycler.requestLayout();
+    }
+
+    private SharedPreferences launcherState() {
+        return getSharedPreferences(STATE_PREFS, MODE_PRIVATE);
+    }
+
+    private boolean hasPackageRescanPending() {
+        return launcherState().getBoolean(KEY_PACKAGE_RESCAN_PENDING, false);
+    }
+
+    private void clearPackageRescanPending() {
+        launcherState().edit().putBoolean(KEY_PACKAGE_RESCAN_PENDING, false).apply();
+    }
+
+    private void markScanFinished() {
+        launcherState().edit()
+                .putLong(KEY_LAST_SCAN_FINISHED_AT, System.currentTimeMillis())
+                .putBoolean(KEY_PACKAGE_RESCAN_PENDING, false)
+                .apply();
+    }
+
+    private void focusFirstTileIfNeeded() {
+        if (recycler == null) return;
+        recycler.post(new Runnable() {
+            @Override
+            public void run() {
+                if (recycler != null && recycler.getFocusedChild() == null && recycler.getChildCount() > 0) {
+                    recycler.getChildAt(0).requestFocus();
+                }
+            }
+        });
+    }
+
+    private boolean beginScanIfIdle(String reason) {
+        if (scanInProgress) {
+            Log.i("OUYAlaunch", "scan skipped, already running: " + reason);
+            return false;
+        }
+        scanInProgress = true;
+        Log.i("OUYAlaunch", "scan started: " + reason);
+        return true;
+    }
+
+    private void endScan(String reason) {
+        scanInProgress = false;
+        Log.i("OUYAlaunch", "scan finished: " + reason);
+    }
+
+    private void startInitialScanIfIdle() {
+        if (!beginScanIfIdle("initial-cache")) return;
+        new ScanTask().execute();
+    }
+
+    private void runPendingPackageRescanIfVisible() {
+        if (!hasPackageRescanPending()) return;
+        if (!dataStore.isCacheBuilt()) return;
+        if (isFinishing()) return;
+        if (scanInProgress) {
+            pendingForegroundRescan = true;
+            return;
+        }
+        Log.i("OUYAlaunch", "package changes pending - refreshing cache now");
+        rescanAppsPreserveGenres("package-change-on-resume");
+    }
+
+    private void schedulePendingPackageRescanIfNeeded() {
+        rescanHandler.removeCallbacks(foregroundPackageRescanRunnable);
+        if (hasPackageRescanPending()) {
+            Log.i("OUYAlaunch", "stale package rescan flag ignored; manual L2+R2 scan only");
+            clearPackageRescanPending();
+        }
     }
 
     private void setupTabs() {
@@ -347,11 +430,12 @@ List<AppEntry> filterByCurrentTab(List<AppEntry> ignored) {
     // ==============================
     // NEU: Rescan-Funktion
     // ==============================
-    private void rescanAppsPreserveGenres() {
+    private void rescanAppsPreserveGenres(String reason) {
+        if (!beginScanIfIdle(reason)) return;
         new AsyncTask<Void, Void, List<AppEntry>>() {
             @Override
             protected void onPreExecute() {
-                overlayLoading.setVisibility(View.VISIBLE);
+                if (overlayLoading != null) overlayLoading.setVisibility(View.VISIBLE);
             }
 
             @Override
@@ -414,24 +498,26 @@ List<AppEntry> filterByCurrentTab(List<AppEntry> ignored) {
                 }
 
                 dataStore.save(sortedMerged, true);
+                clearPackageRescanPending();
                 return sortedMerged;
             }
 
             @Override
             protected void onPostExecute(List<AppEntry> result) {
-                overlayLoading.setVisibility(View.GONE);
-                if (result == null) {
-                    result = new ArrayList<>();
-                }
-                allApps = result;
-                markAllTabsDirty();
-                adapter.setData(filterByCurrentTab(allApps));
-                recycler.post(() -> {
-                    // Prüfen, ob überhaupt ein View fokussiert ist
-                    if (recycler.getFocusedChild() == null && recycler.getChildCount() > 0) {
-                        recycler.getChildAt(0).requestFocus();
+                try {
+                    if (overlayLoading != null) overlayLoading.setVisibility(View.GONE);
+                    if (result == null) {
+                        result = new ArrayList<>();
                     }
-                });
+                    allApps = result;
+                    markAllTabsDirty();
+                    adapter.setData(filterByCurrentTab(allApps));
+                    markScanFinished();
+                    focusFirstTileIfNeeded();
+                } finally {
+                    endScan(reason);
+                    pendingForegroundRescan = false;
+                }
 
             }
         }.execute();
@@ -470,18 +556,15 @@ private class ScanTask extends AsyncTask<Void, Void, List<AppEntry>> {
             }
 
             dataStore.save(appEntries, true);
+            clearPackageRescanPending();
 
             allApps = appEntries;
             markAllTabsDirty();
 
             if (adapter != null) {
                 adapter.setData(filterByCurrentTab(allApps));
-                recycler.post(() -> {
-                    // Prüfen, ob überhaupt ein View fokussiert ist
-                    if (recycler.getFocusedChild() == null && recycler.getChildCount() > 0) {
-                        recycler.getChildAt(0).requestFocus();
-                    }
-                });
+                markScanFinished();
+                focusFirstTileIfNeeded();
 
             } else {
                 Log.w("ScanTask", "Adapter is null!");
@@ -491,12 +574,29 @@ private class ScanTask extends AsyncTask<Void, Void, List<AppEntry>> {
 
         } catch (Throwable t) {
             Log.e("ScanTask", "onPostExecute crash", t);
+        } finally {
+            endScan("initial-cache");
+            pendingForegroundRescan = false;
         }
     }
-}@Override
+}
+
+    @Override
     public void onAppLaunch(AppEntry entry) {
         try {
             Intent launchIntent = getPackageManager().getLaunchIntentForPackage(entry.packageName);
+            if (launchIntent == null) {
+                Intent ouyaIntent = new Intent(Intent.ACTION_MAIN, null);
+                ouyaIntent.addCategory("tv.ouya.intent.category.GAME");
+                ouyaIntent.setPackage(entry.packageName);
+                java.util.List<android.content.pm.ResolveInfo> matches = getPackageManager().queryIntentActivities(ouyaIntent, 0);
+                if (matches != null && matches.size() > 0 && matches.get(0).activityInfo != null) {
+                    android.content.pm.ActivityInfo ai = matches.get(0).activityInfo;
+                    launchIntent = new Intent(Intent.ACTION_MAIN);
+                    launchIntent.setClassName(ai.packageName, ai.name);
+                    launchIntent.addCategory("tv.ouya.intent.category.GAME");
+                }
+            }
             if (launchIntent != null) {
                 startActivity(launchIntent);
             }
@@ -568,16 +668,16 @@ private class ScanTask extends AsyncTask<Void, Void, List<AppEntry>> {
         switch (keyCode) {
             case KeyEvent.KEYCODE_BUTTON_L2:
                 l2Pressed = true;
-                if (r2Pressed) {
-                    Log.i("MainActivity", "L2 + R2 gedrückt – starte erneuten Scan");
-                    rescanAppsPreserveGenres();
+                if (r2Pressed && event.getRepeatCount() == 0) {
+                    Log.i("MainActivity", "L2 + R2 gedrückt – starte manuellen Scan");
+                    rescanAppsPreserveGenres("manual-l2-r2");
                 }
                 return true;
             case KeyEvent.KEYCODE_BUTTON_R2:
                 r2Pressed = true;
-                if (l2Pressed) {
-                    Log.i("MainActivity", "L2 + R2 gedrückt – starte erneuten Scan");
-                    rescanAppsPreserveGenres();
+                if (l2Pressed && event.getRepeatCount() == 0) {
+                    Log.i("MainActivity", "L2 + R2 gedrückt – starte manuellen Scan");
+                    rescanAppsPreserveGenres("manual-l2-r2");
                 }
                 return true;
             case KeyEvent.KEYCODE_BUTTON_Y:
@@ -689,6 +789,7 @@ private class ScanTask extends AsyncTask<Void, Void, List<AppEntry>> {
         super.onPause();
         // Timer stoppen, solange der Launcher nicht im Vordergrund ist
         networkHandler.removeCallbacks(networkUpdateRunnable);
+        rescanHandler.removeCallbacks(foregroundPackageRescanRunnable);
     }
 
     @Override
@@ -703,5 +804,9 @@ private class ScanTask extends AsyncTask<Void, Void, List<AppEntry>> {
         // Sicherheitshalber alte Callbacks entfernen und dann neu starten
         networkHandler.removeCallbacks(networkUpdateRunnable);
         networkHandler.postDelayed(networkUpdateRunnable, NETWORK_UPDATE_INTERVAL_MS);
+
+        // Keine automatischen Package-Rescans beim Zurückkehren aus Spielen.
+        // Cache-Updates nur beim allerersten Start oder manuell per L2+R2.
+        schedulePendingPackageRescanIfNeeded();
     }
 }

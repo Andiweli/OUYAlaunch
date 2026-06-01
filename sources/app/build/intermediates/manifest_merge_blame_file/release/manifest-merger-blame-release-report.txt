@@ -1,0 +1,98 @@
+1<?xml version="1.0" encoding="utf-8"?>
+2<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+3    package="com.ast.ouyalaunch"
+4    android:versionCode="11"
+5    android:versionName="1.7.2" >
+6
+7    <uses-sdk
+8        android:minSdkVersion="16"
+8-->E:\Development\Android\OUYAlaunch\OUYAlaunch_1.7.1\app\src\main\AndroidManifest.xml
+9        android:targetSdkVersion="34" />
+9-->E:\Development\Android\OUYAlaunch\OUYAlaunch_1.7.1\app\src\main\AndroidManifest.xml
+10
+11    <uses-feature
+11-->E:\Development\Android\OUYAlaunch\OUYAlaunch_1.7.1\app\src\main\AndroidManifest.xml:5:5-86
+12        android:name="android.software.leanback"
+12-->E:\Development\Android\OUYAlaunch\OUYAlaunch_1.7.1\app\src\main\AndroidManifest.xml:5:19-59
+13        android:required="false" />
+13-->E:\Development\Android\OUYAlaunch\OUYAlaunch_1.7.1\app\src\main\AndroidManifest.xml:5:60-84
+14
+15    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+15-->E:\Development\Android\OUYAlaunch\OUYAlaunch_1.7.1\app\src\main\AndroidManifest.xml:6:5-118
+15-->E:\Development\Android\OUYAlaunch\OUYAlaunch_1.7.1\app\src\main\AndroidManifest.xml:6:22-74
+16    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+16-->E:\Development\Android\OUYAlaunch\OUYAlaunch_1.7.1\app\src\main\AndroidManifest.xml:7:5-79
+16-->E:\Development\Android\OUYAlaunch\OUYAlaunch_1.7.1\app\src\main\AndroidManifest.xml:7:22-77
+17    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+17-->E:\Development\Android\OUYAlaunch\OUYAlaunch_1.7.1\app\src\main\AndroidManifest.xml:8:5-80
+17-->E:\Development\Android\OUYAlaunch\OUYAlaunch_1.7.1\app\src\main\AndroidManifest.xml:8:22-78
+18    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+18-->E:\Development\Android\OUYAlaunch\OUYAlaunch_1.7.1\app\src\main\AndroidManifest.xml:10:5-78
+18-->E:\Development\Android\OUYAlaunch\OUYAlaunch_1.7.1\app\src\main\AndroidManifest.xml:10:22-76
+19    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+19-->E:\Development\Android\OUYAlaunch\OUYAlaunch_1.7.1\app\src\main\AndroidManifest.xml:11:5-75
+19-->E:\Development\Android\OUYAlaunch\OUYAlaunch_1.7.1\app\src\main\AndroidManifest.xml:11:22-73
+20
+21    <application
+21-->E:\Development\Android\OUYAlaunch\OUYAlaunch_1.7.1\app\src\main\AndroidManifest.xml:13:5-39:19
+22        android:name="androidx.multidex.MultiDexApplication"
+23        android:allowBackup="true"
+23-->E:\Development\Android\OUYAlaunch\OUYAlaunch_1.7.1\app\src\main\AndroidManifest.xml:14:9-35
+24        android:appComponentFactory="androidx.core.app.CoreComponentFactory"
+24-->[androidx.core:core:1.3.2] C:\Users\andiw\.gradle\caches\transforms-2\files-2.1\82353ad9dd753c93bc0889bea34c08f5\core-1.3.2\AndroidManifest.xml:24:18-86
+25        android:icon="@drawable/ouya_app"
+25-->E:\Development\Android\OUYAlaunch\OUYAlaunch_1.7.1\app\src\main\AndroidManifest.xml:15:9-42
+26        android:label="OUYAlaunch"
+26-->E:\Development\Android\OUYAlaunch\OUYAlaunch_1.7.1\app\src\main\AndroidManifest.xml:16:9-35
+27        android:theme="@style/AppTheme" >
+27-->E:\Development\Android\OUYAlaunch\OUYAlaunch_1.7.1\app\src\main\AndroidManifest.xml:17:9-40
+28        <activity
+28-->E:\Development\Android\OUYAlaunch\OUYAlaunch_1.7.1\app\src\main\AndroidManifest.xml:18:9-30:20
+29            android:name="com.ast.ouyalaunch.MainActivity"
+29-->E:\Development\Android\OUYAlaunch\OUYAlaunch_1.7.1\app\src\main\AndroidManifest.xml:19:13-41
+30            android:clearTaskOnLaunch="true"
+30-->E:\Development\Android\OUYAlaunch\OUYAlaunch_1.7.1\app\src\main\AndroidManifest.xml:23:13-45
+31            android:label="OUYAlaunch"
+31-->E:\Development\Android\OUYAlaunch\OUYAlaunch_1.7.1\app\src\main\AndroidManifest.xml:20:13-39
+32            android:launchMode="singleTask"
+32-->E:\Development\Android\OUYAlaunch\OUYAlaunch_1.7.1\app\src\main\AndroidManifest.xml:21:13-44
+33            android:screenOrientation="landscape" >
+33-->E:\Development\Android\OUYAlaunch\OUYAlaunch_1.7.1\app\src\main\AndroidManifest.xml:22:13-50
+34            <intent-filter>
+34-->E:\Development\Android\OUYAlaunch\OUYAlaunch_1.7.1\app\src\main\AndroidManifest.xml:24:13-29:29
+35                <action android:name="android.intent.action.MAIN" />
+35-->E:\Development\Android\OUYAlaunch\OUYAlaunch_1.7.1\app\src\main\AndroidManifest.xml:25:17-69
+35-->E:\Development\Android\OUYAlaunch\OUYAlaunch_1.7.1\app\src\main\AndroidManifest.xml:25:25-66
+36
+37                <category android:name="android.intent.category.HOME" />
+37-->E:\Development\Android\OUYAlaunch\OUYAlaunch_1.7.1\app\src\main\AndroidManifest.xml:26:17-73
+37-->E:\Development\Android\OUYAlaunch\OUYAlaunch_1.7.1\app\src\main\AndroidManifest.xml:26:27-70
+38                <category android:name="android.intent.category.LAUNCHER" />
+38-->E:\Development\Android\OUYAlaunch\OUYAlaunch_1.7.1\app\src\main\AndroidManifest.xml:27:17-77
+38-->E:\Development\Android\OUYAlaunch\OUYAlaunch_1.7.1\app\src\main\AndroidManifest.xml:27:27-74
+39                <category android:name="android.intent.category.DEFAULT" />
+39-->E:\Development\Android\OUYAlaunch\OUYAlaunch_1.7.1\app\src\main\AndroidManifest.xml:28:17-76
+39-->E:\Development\Android\OUYAlaunch\OUYAlaunch_1.7.1\app\src\main\AndroidManifest.xml:28:27-73
+40            </intent-filter>
+41        </activity>
+42
+43        <receiver android:name="com.ast.ouyalaunch.PackageChangeReceiver" >
+43-->E:\Development\Android\OUYAlaunch\OUYAlaunch_1.7.1\app\src\main\AndroidManifest.xml:32:9-38:20
+43-->E:\Development\Android\OUYAlaunch\OUYAlaunch_1.7.1\app\src\main\AndroidManifest.xml:32:19-56
+44            <intent-filter>
+44-->E:\Development\Android\OUYAlaunch\OUYAlaunch_1.7.1\app\src\main\AndroidManifest.xml:33:13-37:29
+45                <action android:name="android.intent.action.PACKAGE_ADDED" />
+45-->E:\Development\Android\OUYAlaunch\OUYAlaunch_1.7.1\app\src\main\AndroidManifest.xml:34:17-77
+45-->E:\Development\Android\OUYAlaunch\OUYAlaunch_1.7.1\app\src\main\AndroidManifest.xml:34:25-75
+46                <action android:name="android.intent.action.PACKAGE_REMOVED" />
+46-->E:\Development\Android\OUYAlaunch\OUYAlaunch_1.7.1\app\src\main\AndroidManifest.xml:35:17-79
+46-->E:\Development\Android\OUYAlaunch\OUYAlaunch_1.7.1\app\src\main\AndroidManifest.xml:35:25-77
+47
+48                <data android:scheme="package" />
+48-->E:\Development\Android\OUYAlaunch\OUYAlaunch_1.7.1\app\src\main\AndroidManifest.xml:36:17-49
+48-->E:\Development\Android\OUYAlaunch\OUYAlaunch_1.7.1\app\src\main\AndroidManifest.xml:36:23-47
+49            </intent-filter>
+50        </receiver>
+51    </application>
+52
+53</manifest>
