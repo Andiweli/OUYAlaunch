@@ -1,4 +1,4 @@
-# OUYAlaunch <br/> Lightweight launcher for the OUYA Android micro-console
+# OUYAlaunch <br/> Lightweight launcher for OUYA Android console
 
 > Fast, OUYA-themed Android launcher for the **OUYA** micro-gaming-console with favorites, genre tabs, and automatic icon caching.
 
