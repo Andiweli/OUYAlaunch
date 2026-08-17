@@ -6,6 +6,8 @@
 [![Platform](https://img.shields.io/badge/platform-OUYA%20(Android%204.1.2)-orange)](https://github.com/andiweli/OUYAlaunch)
 [![minSdk](https://img.shields.io/badge/minSdk-16-brightgreen)](https://github.com/andiweli/OUYAlaunch)
 [![Language](https://img.shields.io/badge/language-Java-blue)](https://github.com/andiweli/OUYAlaunch)
+[![Support via PayPal](https://img.shields.io/badge/Support%20via-PayPal-0070BA?logo=paypal\&logoColor=white)](https://paypal.me/andiweli)
+
 
 **OUYAlaunch** is a custom home-screen replacement for the **OUYA** Android micro-console.  
 It focuses on a clean, OUYA-styled UI, fast navigation with the OUYA controller and a lightweight code base that runs smoothly on the original hardware.
@@ -144,6 +146,18 @@ If you want to modify OUYAlaunch or build it yourself:
 5. Deploy the resulting APK to your OUYA.
 
 The project is optimized for SDK 16 so it stays compatible with the original OUYA system software.
+
+---
+
+## ❤️ Support
+
+If you enjoy this project and would like to support my work, you can make a small contribution via PayPal.
+
+Your support helps me spend more time maintaining existing projects, fixing bugs, improving compatibility, and working on new features.
+
+[![Support via PayPal](https://img.shields.io/badge/Support%20via-PayPal-0070BA?logo=paypal\&logoColor=white)](https://paypal.me/andiweli)
+
+Thank you for your support!
 
 ---
 
