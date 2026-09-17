@@ -2,7 +2,7 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
 
     <!-- Haupt-Theme für den OUYA Launcher -->
-    <style name="AppTheme" parent="Theme.AppCompat.NoActionBar">
+    <style name="BaseAppTheme" parent="Theme.AppCompat.NoActionBar">
 
         <item name="android:windowFullscreen">true</item>
         <item name="android:windowContentOverlay">@null</item>
@@ -15,8 +15,6 @@
         <item name="android:windowNoTitle">true</item>
 
         <!-- Systemleisten dunkel -->
-        <item name="android:statusBarColor">#000000</item>
-        <item name="android:navigationBarColor">#000000</item>
 
         <!-- Standard-Schrift hell -->
         <item name="android:textColorPrimary">#FFFFFF</item>
@@ -28,7 +26,6 @@
         <item name="colorAccent">#FF2B00</item>
 
         <!-- Blauen TV-Fokus deaktivieren -->
-        <item name="android:defaultFocusHighlightEnabled">false</item>
 
         <!-- Optional: Schriftarten-Feeling -->
         <item name="android:fontFamily">sans-serif-medium</item>
@@ -36,6 +33,8 @@
         <!-- Optionale Übergangs-Optik -->
         <item name="android:windowAnimationStyle">@style/FadeInAnimation</item>
     </style>
+
+    <style name="AppTheme" parent="BaseAppTheme" />
 
     <!-- Sanfter Fade-In für Aktivitätswechsel -->
     <style name="FadeInAnimation">

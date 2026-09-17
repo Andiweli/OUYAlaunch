@@ -33,4 +33,12 @@
             android:ellipsize="end"/>
     </LinearLayout>
 
+    <View
+        android:id="@+id/focus_border"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@drawable/app_hover_bg"
+        android:alpha="0"
+        android:focusable="false"
+        android:clickable="false" />
 </FrameLayout>

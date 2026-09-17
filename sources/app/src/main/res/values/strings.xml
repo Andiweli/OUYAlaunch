@@ -9,4 +9,15 @@
     <string name="tab_sim">Simulation</string>
     <string name="tab_rpg">RPG</string>
     <string name="tab_apps">Apps</string>
+    <string name="load_failed">App list could not be loaded. Existing data has been kept.</string>
+    <string name="save_failed">Changes could not be saved. Please check free storage.</string>
+    <string name="launch_failed">App could not be started. Check that its storage is connected.</string>
+    <string name="categories_title">Categories</string>
+    <string name="categories_hint">Choose visible categories and edit their names. Hidden games keep their assignments. O/A: select or edit a name. B: cancel.</string>
+    <string name="category_required">At least one category must remain visible.</string>
+    <string name="no_assignable_category">Enable a game category before assigning games.</string>
+    <string name="cancel">Cancel</string>
+    <string name="save">Save</string>
+    <string name="category_slot">Tab %1$d</string>
+    <string name="app_author">by Andreas \'Andiweli\' Stürmer</string>
 </resources>

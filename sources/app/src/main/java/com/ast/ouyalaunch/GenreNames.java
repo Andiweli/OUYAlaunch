@@ -65,6 +65,18 @@ public final class GenreNames {
         return v;
     }
 
+    /** One filesystem check per refresh, on the shared background storage queue. */
+    public static synchronized Map<String, String> getDisplayNames(Context context) {
+        ensureLoaded(context);
+        Map<String, String> names = new HashMap<>(cache);
+        for (Map.Entry<String, String> entry : names.entrySet()) {
+            if (entry.getValue() == null || entry.getValue().trim().length() == 0) {
+                entry.setValue(entry.getKey());
+            }
+        }
+        return names;
+    }
+
     /** Force a reload next time (e.g., if an options screen changed names). */
     public static synchronized void invalidate() {
         cache = null;

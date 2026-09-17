@@ -1,29 +1,33 @@
 package com.ast.ouyalaunch;
 
 import android.content.Context;
-import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
-import android.util.Log;
 import android.view.KeyEvent;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ImageView;
 import android.widget.TextView;
-import android.util.LruCache;
-
 import androidx.annotation.NonNull;
+import androidx.recyclerview.widget.DiffUtil;
 import androidx.recyclerview.widget.RecyclerView;
-
-import java.io.File;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Set;
+import java.util.WeakHashMap;
 
 public class AppAdapter extends RecyclerView.Adapter<AppAdapter.VH> {
-
-    private int selectedPosition = RecyclerView.NO_POSITION;
-
-    private LruCache<String, Bitmap> iconCache;
+    // Match the original unfocused tile size; enlarging every tile narrows the visible gaps.
+    private static final float NORMAL_SCALE = 1.0f;
+    private static final float FOCUS_SCALE = 1.1f;
+    private final LayoutInflater inflater;
+    private final OnAppClickListener listener;
+    private final IconLoader icons = new IconLoader();
+    private final Set<VH> holders = Collections.newSetFromMap(new WeakHashMap<VH, Boolean>());
+    private List<AppEntry> data = new ArrayList<>();
+    private String selectedPackage;
+    private boolean imagesActive = true;
+    private int prefetchFirst = Integer.MIN_VALUE, prefetchDirection;
 
     public interface OnAppClickListener {
         void onAppLaunch(AppEntry entry);
@@ -31,157 +35,175 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.VH> {
         void onToggleFavorite(AppEntry entry);
     }
 
-    private final Context ctx;
-    private List<AppEntry> data = new ArrayList<>();
-    private final OnAppClickListener listener;
-
-    public AppAdapter(Context ctx, List<AppEntry> d, OnAppClickListener listener) {
-        this.ctx = ctx;
-        this.data = d;
+    public AppAdapter(Context context, OnAppClickListener listener) {
+        inflater = LayoutInflater.from(context);
         this.listener = listener;
-
-        // LruCache für App-Icons
-        final int maxMemory = (int) (Runtime.getRuntime().maxMemory() / 1024);
-        final int cacheSize = maxMemory / 8;
-        iconCache = new LruCache<>(cacheSize);
     }
 
-    public void setData(List<AppEntry> d) {
-        this.data = d != null ? d : new ArrayList<>();
-        if (selectedPosition >= this.data.size()) {
-            selectedPosition = RecyclerView.NO_POSITION;
-        }
+    /** Independent value snapshots are essential: MainActivity edits mutable AppEntry values. */
+    public void setData(List<AppEntry> entries) {
+        final List<AppEntry> old = data;
+        final List<AppEntry> next = DataStore.snapshot(entries);
+        DiffUtil.DiffResult diff = DiffUtil.calculateDiff(new DiffUtil.Callback() {
+            @Override public int getOldListSize() { return old.size(); }
+            @Override public int getNewListSize() { return next.size(); }
+            @Override public boolean areItemsTheSame(int a, int b) {
+                return old.get(a).packageName.equals(next.get(b).packageName);
+            }
+            @Override public boolean areContentsTheSame(int a, int b) {
+                AppEntry x = old.get(a), y = next.get(b);
+                // Genre/favorite are not rendered; click handlers resolve the current entry.
+                return same(x.title, y.title) && same(x.iconPath, y.iconPath)
+                        && x.packageUpdatedAt == y.packageUpdatedAt
+                        && x.iconCacheVersion == y.iconCacheVersion;
+            }
+        }, false);
+        prefetchFirst = Integer.MIN_VALUE;
+        data = next;
+        diff.dispatchUpdatesTo(this);
+    }
+
+    /** Switching whole pages does not need a quadratic diff of unrelated game lists. */
+    public void replacePage(List<AppEntry> entries) {
+        data = DataStore.snapshot(entries);
+        selectedPackage = null;
+        prefetchFirst = Integer.MIN_VALUE;
         notifyDataSetChanged();
     }
 
-    @NonNull
-    @Override
-    public VH onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
-        View v = LayoutInflater.from(ctx).inflate(R.layout.item_app, parent, false);
-        v.setFocusable(true);
-        v.setFocusableInTouchMode(true);
-        v.setClickable(true);
-        return new VH(v);
-    }
+    private static boolean same(String a, String b) { return a == null ? b == null : a.equals(b); }
 
-    @Override
-    public void onBindViewHolder(@NonNull VH h, int pos) {
-        AppEntry e = data.get(pos);
-        h.title.setText(e.title);
-
-        // App-Icon laden (mit LruCache)
-        if (e.iconPath != null) {
-            File f = new File(e.iconPath);
-            if (f.exists()) {
-                String key = f.getAbsolutePath();
-                Bitmap bm = iconCache.get(key);
-                if (bm == null || bm.isRecycled()) {
-                    bm = BitmapFactory.decodeFile(key);
-                    if (bm != null) {
-                        iconCache.put(key, bm);
-                    }
-                }
-                if (bm != null) {
-                    h.img.setImageBitmap(bm);
-                } else {
-                    h.img.setImageBitmap(null);
-                }
-            } else {
-                h.img.setImageBitmap(null);
+    @NonNull @Override public VH onCreateViewHolder(@NonNull ViewGroup parent, int type) {
+        VH holder = new VH(inflater.inflate(R.layout.item_app, parent, false));
+        holders.add(holder);
+        holder.itemView.setOnFocusChangeListener((view, focused) -> {
+            if (focused) {
+                AppEntry entry = entryFor(holder);
+                if (entry != null) selectedPackage = entry.packageName;
             }
-        } else {
-            h.img.setImageBitmap(null);
-        }
-
-        // Hover/Fokus-Effekt
-        h.itemView.setOnFocusChangeListener((v, hasFocus) -> {
-            v.animate().cancel();
-            if (hasFocus) {
-                selectedPosition = h.getAdapterPosition();
-                v.setBackgroundResource(R.drawable.app_hover_bg);
-                // Auf Standardgröße resetten
-                v.setScaleX(1.05f);
-                v.setScaleY(1.05f);
-                // Skalierung animieren
-                v.animate().scaleX(1.1f).scaleY(1.1f).setDuration(120).start();
-                // Log-Ausgabe entfernt, um Navigation zu beschleunigen
-            } else {
-                v.setBackgroundResource(0);
-                v.animate().scaleX(1.055f).scaleY(1.055f).setDuration(150).start();
-            }
+            view.animate().cancel();
+            // An overlay border avoids background-padding/layout changes on every focus move.
+            holder.border.setAlpha(focused ? 1f : 0f);
+            view.animate().scaleX(focused ? FOCUS_SCALE : NORMAL_SCALE)
+                    .scaleY(focused ? FOCUS_SCALE : NORMAL_SCALE)
+                    .setDuration(focused ? 120 : 150).start();
         });
-
-        // Controller-Steuerung
-        h.itemView.setOnKeyListener((v, keyCode, event) -> {
-            if (event.getAction() == KeyEvent.ACTION_DOWN) {
-                if (keyCode == KeyEvent.KEYCODE_BUTTON_A || keyCode == KeyEvent.KEYCODE_DPAD_CENTER) {
-                    if (listener != null) listener.onAppLaunch(e);
-                    return true;
-                } else if (keyCode == KeyEvent.KEYCODE_BUTTON_X) {
-                    if (listener != null) listener.onGenreChange(e);
-                    return true;
-                } else if (keyCode == KeyEvent.KEYCODE_BUTTON_B) {
-                    if (listener != null) listener.onToggleFavorite(e);
-                    return true;
+        holder.itemView.setOnKeyListener((view, key, event) -> {
+            if (key != KeyEvent.KEYCODE_BUTTON_A && key != KeyEvent.KEYCODE_DPAD_CENTER
+                    && key != KeyEvent.KEYCODE_BUTTON_X && key != KeyEvent.KEYCODE_BUTTON_B) return false;
+            if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
+                AppEntry entry = entryFor(holder);
+                if (entry != null && listener != null) {
+                    if (key == KeyEvent.KEYCODE_BUTTON_X) listener.onGenreChange(entry);
+                    else if (key == KeyEvent.KEYCODE_BUTTON_B) listener.onToggleFavorite(entry);
+                    else listener.onAppLaunch(entry);
                 }
             }
-            return false;
+            return true; // Consume UP too; never also synthesize a second click.
         });
-
-        // Klick mit normalem Touch
-        h.itemView.setOnClickListener(v -> {
-            if (listener != null) listener.onAppLaunch(e);
+        holder.itemView.setOnClickListener(view -> {
+            AppEntry entry = entryFor(holder);
+            if (entry != null && listener != null) listener.onAppLaunch(entry);
         });
-
-        // Falls Adapter nach Datenänderung leer ist, Fokus auf erstes Element setzen
-        if (pos == 0 && selectedPosition == RecyclerView.NO_POSITION) {
-            h.itemView.requestFocus();
-            selectedPosition = 0;
-        }
+        return holder;
     }
 
-    @Override
-    public int getItemCount() {
-        return data.size();
+    private AppEntry entryFor(VH holder) {
+        int position = holder.getAdapterPosition();
+        return position >= 0 && position < data.size() ? data.get(position) : null;
     }
 
-    // 🔹 Fokus-Wiederherstellung nach Scroll
-    @Override
-    public void onViewAttachedToWindow(@NonNull VH holder) {
+    @Override public void onBindViewHolder(@NonNull VH holder, int position) {
+        AppEntry entry = data.get(position);
+        holder.title.setText(entry.title);
+        holder.path = entry.iconPath;
+        holder.itemView.animate().cancel();
+        boolean focused = holder.itemView.hasFocus();
+        if (focused) selectedPackage = entry.packageName;
+        holder.border.setAlpha(focused ? 1f : 0f);
+        holder.itemView.setScaleX(focused ? FOCUS_SCALE : NORMAL_SCALE);
+        holder.itemView.setScaleY(focused ? FOCUS_SCALE : NORMAL_SCALE);
+        // Cache hits also bind immediately while paused; misses wait for the worker to resume.
+        icons.load(holder.img, holder.path);
+    }
+
+    @Override public void onViewAttachedToWindow(@NonNull VH holder) {
         super.onViewAttachedToWindow(holder);
-
-        // Kein Element hat Fokus → auf sichtbares setzen
-        if (selectedPosition == RecyclerView.NO_POSITION && getItemCount() > 0 && holder.itemView.getParent() != null) {
-            // Nur Fokus setzen, wenn aktuell kein anderer View fokussiert ist
-            ViewGroup parent = (ViewGroup) holder.itemView.getParent();
-            if (parent.findFocus() == null) {
-                holder.itemView.requestFocus();
-                selectedPosition = holder.getAdapterPosition();
-            }
-        }
-    // Wenn das gespeicherte Element wieder sichtbar ist → Fokus zurückgeben
-        if (holder.getAdapterPosition() == selectedPosition) {
-            holder.itemView.requestFocus();
-        }
+        if (imagesActive) icons.load(holder.img, holder.path);
     }
 
-    // 🔹 Aktuell fokussierte App abrufen
+    @Override public void onViewRecycled(@NonNull VH holder) {
+        holder.itemView.animate().cancel();
+        holder.border.setAlpha(0f);
+        holder.itemView.setScaleX(NORMAL_SCALE);
+        holder.itemView.setScaleY(NORMAL_SCALE);
+        IconLoader.clear(holder.img);
+        holder.path = null;
+        super.onViewRecycled(holder);
+    }
+
+    @Override public int getItemCount() { return data.size(); }
+    public String getSelectedPackage() { return selectedPackage; }
+    public int positionOf(String pkg) {
+        if (pkg != null) for (int i = 0; i < data.size(); i++) {
+            if (pkg.equals(data.get(i).packageName)) return i;
+        }
+        return RecyclerView.NO_POSITION;
+    }
     public AppEntry getSelectedApp() {
-        if (selectedPosition >= 0 && selectedPosition < data.size()) {
-            return data.get(selectedPosition);
+        int position = positionOf(selectedPackage);
+        return position >= 0 ? data.get(position) : null;
+    }
+    public void prefetch(int first, int direction) {
+        if (first == prefetchFirst && direction == prefetchDirection) return;
+        prefetchFirst = first;
+        prefetchDirection = direction;
+        icons.prefetch(data, first, direction);
+    }
+    public void invalidateIcons() {
+        prefetchFirst = Integer.MIN_VALUE;
+        icons.invalidate();
+        for (VH holder : holders) IconLoader.clear(holder.img);
+    }
+    public void preparePage(List<AppEntry> entries, int first, int count, Runnable ready) {
+        icons.prepare(entries, first, count, ready);
+    }
+    public void cancelPreparation() { icons.cancelPreparation(); }
+    public void setImagesActive(boolean active) {
+        imagesActive = active;
+        icons.setPaused(!active);
+        if (active) { prefetchFirst = Integer.MIN_VALUE; reloadAttachedImages(); }
+        else for (VH holder : holders) {
+            holder.itemView.animate().cancel();
+            boolean focused = holder.itemView.hasFocus();
+            holder.itemView.setScaleX(focused ? FOCUS_SCALE : NORMAL_SCALE);
+            holder.itemView.setScaleY(focused ? FOCUS_SCALE : NORMAL_SCALE);
+            holder.border.setAlpha(focused ? 1f : 0f);
         }
-        return null;
+    }
+    private void reloadAttachedImages() {
+        if (!imagesActive) return;
+        for (VH holder : holders) {
+            if (holder.itemView.getParent() != null && holder.path != null) icons.load(holder.img, holder.path);
+        }
+    }
+    public void trimMemory(boolean severe) { icons.trim(severe); }
+    public void close() {
+        icons.close();
+        for (VH holder : holders) IconLoader.clear(holder.img);
+        holders.clear();
     }
 
-    // 🔹 ViewHolder
     public static class VH extends RecyclerView.ViewHolder {
-        ImageView img;
-        TextView title;
-
-        public VH(@NonNull View v) {
-            super(v);
-            img = v.findViewById(R.id.img);
-            title = v.findViewById(R.id.title);
+        final ImageView img;
+        final TextView title;
+        final View border;
+        String path;
+        VH(View view) {
+            super(view);
+            img = view.findViewById(R.id.img);
+            title = view.findViewById(R.id.title);
+            border = view.findViewById(R.id.focus_border);
         }
     }
 }

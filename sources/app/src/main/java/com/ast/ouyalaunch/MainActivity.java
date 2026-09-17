@@ -1,165 +1,667 @@
 package com.ast.ouyalaunch;
 
 import android.content.Context;
-import android.util.Log;
 import android.content.Intent;
-import android.content.pm.PackageManager;
-import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
+import android.content.pm.ActivityInfo;
+import android.content.pm.ResolveInfo;
 import android.graphics.Color;
 import android.graphics.PorterDuff;
-import android.os.AsyncTask;
-import android.os.Bundle;
-import android.content.SharedPreferences;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 import android.net.wifi.WifiInfo;
 import android.net.wifi.WifiManager;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.Parcelable;
+import android.os.SystemClock;
+import android.util.Log;
 import android.view.KeyEvent;
 import android.view.LayoutInflater;
 import android.view.View;
+import android.view.ViewGroup;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
+import android.widget.Toast;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.view.MarginLayoutParamsCompat;
 import androidx.recyclerview.widget.GridLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
-import android.view.ViewGroup;
-import java.io.File;
+import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
-import java.util.UUID;
-import android.os.Handler;
-
-
+import java.util.Locale;
+import java.util.Map;
 
 public class MainActivity extends AppCompatActivity implements AppAdapter.OnAppClickListener {
-
-    public static final List<String> GENRES = Arrays.asList("Favorites", "Casual", "Action", "Racing", "Simulation", "RPG", "Apps");
-
-    private static final String STATE_PREFS = "ouyalaunch_state";
-    private static final String KEY_PACKAGE_RESCAN_PENDING = "package_rescan_pending";
-    private static final String KEY_LAST_SCAN_FINISHED_AT = "last_scan_finished_at";
-
-    private RecyclerView recycler;
-    private View overlayLoading;
-    private LinearLayout tabContainer;
-
-    private ImageView imgNetworkStatus;
-    private final int[] WIFI_ICONS = {
-            R.drawable.ic_wifi_0,
-            R.drawable.ic_wifi_1,
-            R.drawable.ic_wifi_2,
-            R.drawable.ic_wifi_3,
-            R.drawable.ic_wifi_4
-    };
-
-    private static final long NETWORK_UPDATE_INTERVAL_MS = 15_000L;
-    private final Handler networkHandler = new Handler();
-    private final Runnable networkUpdateRunnable = new Runnable() {
-        @Override
-        public void run() {
+    public static final List<String> GENRES = Collections.unmodifiableList(Arrays.asList(
+            "Favorites", "Casual", "Action", "Racing", "Simulation", "RPG", "Apps"));
+    private static final Handler MAIN = new Handler(Looper.getMainLooper());
+    private static final int[] WIFI_ICONS = { R.drawable.ic_wifi_0, R.drawable.ic_wifi_1,
+            R.drawable.ic_wifi_2, R.drawable.ic_wifi_3, R.drawable.ic_wifi_4 };
+    private final Handler handler = new Handler(Looper.getMainLooper());
+    private final Runnable networkUpdate = new Runnable() {
+        @Override public void run() {
+            if (!resumed) return;
             updateNetworkIcon();
-            // nächsten Lauf in 15 Sekunden planen
-            networkHandler.postDelayed(this, NETWORK_UPDATE_INTERVAL_MS);
+            handler.postDelayed(this, 15000L);
         }
     };
-
+    private RecyclerView recycler;
+    private GridLayoutManager grid;
+    private View overlayLoading;
+    private SlidingTabLayout tabContainer;
+    private android.view.ViewTreeObserver.OnPreDrawListener pageReveal;
+    private ImageView imgNetworkStatus;
     private AppAdapter adapter;
-    private int currentTab = 0; // default "Favorites"
     private DataStore dataStore;
     private List<AppEntry> allApps = new ArrayList<>();
-    private List<List<AppEntry>> tabLists;
-    private boolean[] tabDirty;
-    private boolean scanInProgress = false;
-    private boolean pendingForegroundRescan = false;
+    private final List<List<AppEntry>> tabLists = new ArrayList<>();
+    private final boolean[] tabDirty = new boolean[GENRES.size()];
+    private final Parcelable[] tabScroll = new Parcelable[GENRES.size()];
+    private final String[] tabFocus = new String[GENRES.size()];
+    private final int[] tabFirstVisible = new int[GENRES.size()];
+    private CategorySettings categories = CategorySettings.defaults();
+    private androidx.appcompat.app.AlertDialog categoryDialog;
+    private boolean preparingPage;
+    private int requestedTab = -1;
+    private int pageGeneration;
+    private boolean stoppedSincePause = true;
+    private long pausedAt;
+    private boolean showCategoriesOnResume;
+    private int currentTab;
+    private int focusGeneration;
+    private int networkIcon;
+    private boolean scanInProgress;
+    private boolean loaded;
+    private boolean destroyed;
+    private boolean resumed;
+    private boolean launchPending;
+    private boolean l2Pressed, r2Pressed, yPressed;
+    private long yDownAt;
 
-    private static final long PACKAGE_RESCAN_FOREGROUND_DELAY_MS = 1500L;
-    private final Handler rescanHandler = new Handler();
-    private final Runnable foregroundPackageRescanRunnable = new Runnable() {
-        @Override
-        public void run() {
-            runPendingPackageRescanIfVisible();
-        }
-    };
-
-    @Override
-    protected void onCreate(@Nullable Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
+    @Override protected void onCreate(@Nullable Bundle state) {
+        super.onCreate(state);
         setContentView(R.layout.activity_main);
-
-        // --- Eindeutige App-UUID basierend auf Paketnamen ---
-        String packageName = getPackageName();
-        String appUUID = UUID.nameUUIDFromBytes(packageName.getBytes()).toString();
-        Log.d("OUYAlaunch", "App UUID = " + appUUID);
-
-
         recycler = findViewById(R.id.recycler);
         overlayLoading = findViewById(R.id.overlay_loading);
         tabContainer = findViewById(R.id.tab_container);
         imgNetworkStatus = findViewById(R.id.imgNetworkStatus);
-
-        applyNetworkIconTint();
-
+        imgNetworkStatus.setColorFilter(Color.parseColor("#D8D9DC"), PorterDuff.Mode.SRC_IN);
         dataStore = new DataStore(this);
-
-        updateNetworkIcon();
-
-        GridLayoutManager glm = new GridLayoutManager(this, 3);
-        recycler.setLayoutManager(glm);
+        for (int i = 0; i < GENRES.size(); i++) {
+            tabLists.add(new ArrayList<>());
+            tabDirty[i] = true;
+            if (state != null) {
+                tabScroll[i] = state.getParcelable("scroll" + i);
+                tabFocus[i] = state.getString("focus" + i);
+                tabFirstVisible[i] = state.getInt("first" + i, 0);
+            }
+        }
+        if (state != null) currentTab = Math.max(0, Math.min(GENRES.size() - 1, state.getInt("tab", 0)));
+        grid = new ControllerGridLayoutManager(this, 3);
+        recycler.setPreserveFocusAfterLayout(false);
+        recycler.setLayoutManager(grid);
         recycler.setHasFixedSize(true);
         recycler.setItemAnimator(null);
-        recycler.setItemViewCacheSize(30);
+        // Keep a few rows, not 30 bitmap-holding tile views. Tune on real hardware if needed.
+        recycler.setItemViewCacheSize(12);
         recycler.addItemDecoration(new SpacingDecoration(getResources().getDimensionPixelSize(R.dimen.grid_spacing_px)));
-        adapter = new AppAdapter(this, new ArrayList<AppEntry>(), this);
+        adapter = new AppAdapter(this, this);
         recycler.setAdapter(adapter);
-
-        // Fix für Geräte mit gleicher Auflösung aber anderer DPI:
-        // In activity_main.xml werden dp-Margins/Paddings verwendet (OUYA-Layout passt damit).
-        // Auf manchen 1080p-Geräten werden diese dp-Werte zu groß -> Spaltenbreite < feste Tile-Breite -> Überlappung.
-        // Wir passen nur dann dynamisch an, wenn die aktuelle Spaltenbreite die Tile-Breite nicht aufnehmen kann.
-        recycler.post(new Runnable() {
-            @Override
-            public void run() {
-                ensureGridFitsFixedTiles(glm);
+        recycler.addOnScrollListener(new RecyclerView.OnScrollListener() {
+            @Override public void onScrolled(RecyclerView view, int dx, int dy) {
+                if (!resumed || scanInProgress || preparingPage) return;
+                if (dy < 0) adapter.prefetch(grid.findFirstVisibleItemPosition() - 1, -1);
+                else adapter.prefetch(grid.findLastVisibleItemPosition() + 1, 1);
             }
         });
-
+        recycler.post(() -> ensureGridFitsFixedTiles(grid));
         setupTabs();
-
-        // First run: build the cache once. After that OUYAlaunch never rescans
-        // automatically on package changes; only the manual L2+R2 rescan updates the cache.
-        clearPackageRescanPending();
-        if (!dataStore.isCacheBuilt()) {
-            startInitialScanIfIdle();
-        } else {
-            allApps = dataStore.load();
-            markAllTabsDirty();
-            adapter.setData(filterByCurrentTab(allApps));
-            focusFirstTileIfNeeded();
-        }
-
-        // 🟠 Sanfter Fade-In-Effekt beim Appstart
+        startLoading(false);
         View root = findViewById(android.R.id.content);
-        root.setAlpha(0f); // zunächst unsichtbar
-        root.animate()
-                .alpha(1f)                     // auf volle Sichtbarkeit
-                .setDuration(1500)             // Dauer 1,5 Sekunden
-                .setStartDelay(100)            // kleine Verzögerung für flüssigen Start
-                .start();
-
+        root.setAlpha(0f);
+        root.animate().alpha(1f).setDuration(250).start();
     }
 
-    /**
-     * Stellt sicher, dass das Grid mit festen Tile-Pixelmaßen (item_app.xml) nicht überlappt,
-     * wenn dp-basierte Side-Margins/Paddings auf High-DPI-Geräten zu groß werden.
-     *
-     * OUYA soll unverändert bleiben: Wir greifen nur ein, wenn die berechnete Spaltenbreite
-     * kleiner als die feste Tile-Breite ist.
-     */
+    private void setupTabs() {
+        LayoutInflater inflater = LayoutInflater.from(this);
+        for (int i = 0; i < GENRES.size(); i++) {
+            final int index = i;
+            TextView title = (TextView) inflater.inflate(android.R.layout.simple_list_item_1, tabContainer, false);
+            title.setText(categories.name(i));
+            title.setSingleLine(true);
+            title.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            title.setMaxWidth(Math.round(240 * getResources().getDisplayMetrics().density));
+            title.setVisibility(categories.enabled(i) ? View.VISIBLE : View.GONE);
+            title.setTextAppearance(this, R.style.TabText);
+            title.setPadding(32, 0, 32, 0);
+            title.setOnClickListener(view -> selectTab(index));
+            title.setLayoutParams(new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.MATCH_PARENT));
+            tabContainer.addView(title);
+        }
+        findViewById(R.id.header).setOnLongClickListener(view -> { showCategorySettings(); return true; });
+        updateTabBackgrounds();
+    }
+
+    private void updateTabBackgrounds() {
+        int highlighted = requestedTab >= 0 ? requestedTab : currentTab;
+        for (int i = 0; i < tabContainer.getChildCount(); i++) {
+            View view = tabContainer.getChildAt(i);
+            view.setSelected(i == highlighted);
+        }
+        tabContainer.select(highlighted);
+        keepSelectedTabVisible();
+    }
+
+    private void keepSelectedTabVisible() {
+        View selected = tabContainer.getChildAt(requestedTab >= 0 ? requestedTab : currentTab);
+        if (selected != null) selected.post(() -> {
+            if (!destroyed && selected.getVisibility() == View.VISIBLE) {
+                selected.requestRectangleOnScreen(new android.graphics.Rect(0, 0,
+                        selected.getWidth(), selected.getHeight()), true);
+            }
+        });
+    }
+
+    private void rememberTab() {
+        if (preparingPage) return;
+        tabScroll[currentTab] = grid.onSaveInstanceState();
+        tabFirstVisible[currentTab] = Math.max(0, grid.findFirstVisibleItemPosition());
+        String selected = adapter.getSelectedPackage();
+        if (adapter.positionOf(selected) >= 0) tabFocus[currentTab] = selected;
+    }
+
+    private void selectTab(int index) {
+        if (scanInProgress || index < 0 || index >= GENRES.size() || !categories.enabled(index)) return;
+        if (index == currentTab) {
+            if (preparingPage) {
+                pageGeneration++;
+                preparingPage = false;
+                requestedTab = -1;
+                adapter.cancelPreparation();
+                cancelPageReveal();
+                recycler.animate().cancel();
+                recycler.setAlpha(1f);
+                updateTabBackgrounds();
+                restoreFocus(tabFocus[currentTab], tabFirstVisible[currentTab]);
+            }
+            return;
+        }
+        rememberTab();
+        presentPage(index, false);
+    }
+
+    private void presentPage(int index, boolean initial) {
+        ++focusGeneration;
+        recycler.stopScroll();
+        final int ticket = ++pageGeneration;
+        preparingPage = true;
+        requestedTab = index;
+        cancelPageReveal();
+        recycler.animate().cancel();
+        recycler.setAlpha(0f);
+        updateTabBackgrounds();
+        // Let the hidden grid and moving header reach the screen before preparing the page.
+        recycler.postOnAnimation(() -> preparePage(index, initial, ticket));
+    }
+
+    private void preparePage(int index, boolean initial, int ticket) {
+        if (destroyed || ticket != pageGeneration) return;
+        final List<AppEntry> entries = new ArrayList<>(entriesForTab(index));
+        int span = grid.getSpanCount();
+        int first = Math.max(0, Math.min(tabFirstVisible[index], entries.size() - 1));
+        first = first / span * span;
+        int height = recycler.getHeight();
+        if (height <= 0) height = getResources().getDisplayMetrics().heightPixels
+                - getResources().getDimensionPixelSize(R.dimen.header_height_px);
+        int row = getResources().getDimensionPixelSize(R.dimen.tile_height_px)
+                + getResources().getDimensionPixelSize(R.dimen.grid_spacing_px);
+        int count = Math.min(24, ((height + row - 1) / row + 1) * span);
+        adapter.preparePage(entries, first, count, () -> {
+            if (destroyed || ticket != pageGeneration) return;
+            if (!initial && loaded) rememberTab();
+            currentTab = index;
+            recycler.clearFocus();
+            adapter.replacePage(entries);
+            updateTabBackgrounds();
+            if (tabScroll[index] != null) grid.onRestoreInstanceState(tabScroll[index]);
+            else grid.scrollToPositionWithOffset(0, 0);
+            restoreFocus(tabFocus[index], 0);
+            revealPageAfterLayout(ticket);
+        });
+    }
+
+    private void cancelPageReveal() {
+        if (pageReveal != null) {
+            recycler.getViewTreeObserver().removeOnPreDrawListener(pageReveal);
+            pageReveal = null;
+        }
+    }
+
+    private void revealPageAfterLayout(int ticket) {
+        cancelPageReveal();
+        pageReveal = () -> {
+            if (destroyed || ticket != pageGeneration) { cancelPageReveal(); return true; }
+            if (recycler.hasPendingAdapterUpdates() || recycler.isLayoutRequested()) return true;
+            cancelPageReveal();
+            preparingPage = false;
+            requestedTab = -1;
+            overlayLoading.setVisibility(View.GONE);
+            recycler.animate().alpha(1f).setDuration(300)
+                    .setInterpolator(new android.view.animation.AccelerateDecelerateInterpolator()).start();
+            return true;
+        };
+        recycler.getViewTreeObserver().addOnPreDrawListener(pageReveal);
+        recycler.invalidate();
+    }
+
+    private List<AppEntry> currentEntries() { return entriesForTab(currentTab); }
+
+    private List<AppEntry> entriesForTab(int tab) {
+        if (!tabDirty[tab]) return tabLists.get(tab);
+        List<AppEntry> result = tabLists.get(tab);
+        result.clear();
+        String genre = GENRES.get(tab);
+        for (AppEntry entry : allApps) {
+            if (tab == 0 ? entry.favorite : genre.equals(entry.genre)) result.add(entry);
+        }
+        final Map<String, String> keys = new HashMap<>();
+        for (AppEntry entry : result) keys.put(entry.packageName,
+                (entry.title == null ? "" : entry.title).toLowerCase(Locale.ROOT));
+        Collections.sort(result, (a, b) -> keys.get(a.packageName).compareTo(keys.get(b.packageName)));
+        tabDirty[tab] = false;
+        return result;
+    }
+
+    private void dirtyGenre(String genre) {
+        int index = GENRES.indexOf(genre);
+        if (index >= 0) tabDirty[index] = true;
+    }
+
+    private void restoreFocus(String pkg, int fallback) {
+        final int generation = ++focusGeneration;
+        int found = adapter.positionOf(pkg);
+        final int position = found >= 0 ? found : Math.max(0, Math.min(fallback, adapter.getItemCount() - 1));
+        recycler.post(() -> {
+            if (destroyed || generation != focusGeneration) return;
+            if (adapter.getItemCount() == 0) {
+                tabContainer.getChildAt(currentTab).requestFocus();
+                return;
+            }
+            RecyclerView.ViewHolder holder = recycler.findViewHolderForAdapterPosition(position);
+            if (holder != null) holder.itemView.requestFocus();
+            else {
+                grid.scrollToPosition(position);
+                recycler.post(() -> {
+                    if (destroyed || generation != focusGeneration) return;
+                    RecyclerView.ViewHolder next = recycler.findViewHolderForAdapterPosition(position);
+                    if (next != null) next.itemView.requestFocus();
+                });
+            }
+            if (resumed) adapter.prefetch(grid.findLastVisibleItemPosition() + 1, 1);
+        });
+    }
+
+    private void refreshEntries(String preferred, int fallback) {
+        adapter.setData(currentEntries());
+        restoreFocus(preferred, fallback);
+    }
+
+    private AppEntry findEntry(AppEntry requested) {
+        if (requested != null) for (AppEntry entry : allApps) {
+            if (entry.packageName.equals(requested.packageName)) return entry;
+        }
+        return null;
+    }
+
+    private void startLoading(boolean manualScan) {
+        if (scanInProgress) return;
+        pageGeneration++;
+        preparingPage = false;
+        requestedTab = -1;
+        adapter.cancelPreparation();
+        scanInProgress = true;
+        if (loaded) rememberTab();
+        overlayLoading.setVisibility(View.VISIBLE);
+        adapter.setImagesActive(false);
+        enqueueLoad(this, manualScan, loaded ? DataStore.snapshot(allApps) : null);
+    }
+
+    /** Static worker holds application context and a weak UI reference, never an Activity. */
+    private static void enqueueLoad(MainActivity activity, boolean manualScan, List<AppEntry> snapshot) {
+        Context context = activity.getApplicationContext();
+        DataStore store = activity.dataStore;
+        WeakReference<MainActivity> owner = new WeakReference<>(activity);
+        DataStore.execute(() -> {
+            try {
+                final CategorySettings preferences = CategorySettings.load(context);
+                List<AppEntry> entries = snapshot != null ? snapshot : store.load();
+                if (manualScan || entries == null) {
+                    if (entries == null) entries = new ArrayList<>();
+                    entries = AppScanner.buildCache(context, entries);
+                    store.save(entries);
+                }
+                final List<AppEntry> result = entries;
+                MAIN.post(() -> {
+                    MainActivity target = owner.get();
+                    if (target == null || target.destroyed) return;
+                    target.allApps = result;
+                    Arrays.fill(target.tabDirty, true);
+                    target.categories = preferences;
+                    if (!preferences.enabled(target.currentTab)) target.currentTab = preferences.firstVisible();
+                    target.updateCategoryTabs();
+                    target.loaded = true;
+                    target.scanInProgress = false;
+                    if (manualScan) target.adapter.invalidateIcons();
+                    target.adapter.setImagesActive(target.resumed);
+                    target.presentPage(target.currentTab, true);
+                });
+            } catch (Exception error) {
+                Log.e("OUYAlaunch", "Could not load/scan apps", error);
+                MAIN.post(() -> {
+                    MainActivity target = owner.get();
+                    if (target == null || target.destroyed) return;
+                    target.scanInProgress = false;
+                    target.overlayLoading.setVisibility(View.GONE);
+                    target.adapter.setImagesActive(target.resumed);
+                    Toast.makeText(target, R.string.load_failed, Toast.LENGTH_LONG).show();
+                });
+            }
+        });
+    }
+
+    private void saveApps() { enqueueSave(this, DataStore.snapshot(allApps)); }
+    private static void enqueueSave(MainActivity activity, List<AppEntry> snapshot) {
+        DataStore store = activity.dataStore;
+        WeakReference<MainActivity> owner = new WeakReference<>(activity);
+        DataStore.execute(() -> {
+            try { store.save(snapshot); }
+            catch (Exception error) {
+                MAIN.post(() -> {
+                    MainActivity target = owner.get();
+                    if (target != null && !target.destroyed) {
+                        Toast.makeText(target, R.string.save_failed, Toast.LENGTH_LONG).show();
+                    }
+                });
+            }
+        });
+    }
+
+    private static void refreshGenreNames(MainActivity activity) {
+        Context context = activity.getApplicationContext();
+        WeakReference<MainActivity> owner = new WeakReference<>(activity);
+        DataStore.execute(() -> {
+            CategorySettings settings = CategorySettings.load(context);
+            MAIN.post(() -> {
+                MainActivity target = owner.get();
+                if (target != null && !target.destroyed) target.applyCategories(settings);
+            });
+        });
+    }
+
+    private void updateCategoryTabs() {
+        for (int i = 0; i < GENRES.size(); i++) {
+            TextView title = (TextView) tabContainer.getChildAt(i);
+            title.setText(categories.name(i));
+            title.setVisibility(categories.enabled(i) ? View.VISIBLE : View.GONE);
+        }
+        updateTabBackgrounds();
+    }
+
+    private void applyCategories(CategorySettings settings) {
+        categories = settings;
+        updateCategoryTabs();
+        int target = requestedTab >= 0 ? requestedTab : currentTab;
+        if (!categories.enabled(target)) {
+            target = categories.enabled(currentTab) ? currentTab : categories.firstVisible();
+            if (loaded && !scanInProgress) presentPage(target, false);
+            else currentTab = target;
+        }
+    }
+
+    private void showCategorySettings() {
+        if (!loaded || scanInProgress || preparingPage || destroyed) return;
+        if (categoryDialog != null && categoryDialog.isShowing()) return;
+        resetButtons();
+        categoryDialog = CategoryDialog.show(this, categories, settings -> {
+            if (!destroyed) applyCategories(settings);
+        });
+        categoryDialog.setOnDismissListener(dialog -> { categoryDialog = null; resetButtons(); });
+    }
+
+    @Override protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        // Some OUYA firmware sends the middle button to HOME instead of delivering a key.
+        // Only handle a HOME re-entry from the already visible launcher, never return from a game.
+        if (intent != null && Intent.ACTION_MAIN.equals(intent.getAction())
+                && intent.hasCategory(Intent.CATEGORY_HOME)
+                && (resumed || (!stoppedSincePause && SystemClock.uptimeMillis() - pausedAt < 1500))) {
+            showCategoriesOnResume = true;
+            if (resumed) { showCategoriesOnResume = false; showCategorySettings(); }
+        }
+    }
+
+    @Override public void onAppLaunch(AppEntry requested) {
+        if (scanInProgress || preparingPage || launchPending) return;
+        AppEntry entry = findEntry(requested);
+        if (entry == null) return;
+        try {
+            Intent intent = getPackageManager().getLaunchIntentForPackage(entry.packageName);
+            if (intent == null) {
+                Intent query = new Intent(Intent.ACTION_MAIN).addCategory("tv.ouya.intent.category.GAME")
+                        .setPackage(entry.packageName);
+                List<ResolveInfo> matches = getPackageManager().queryIntentActivities(query, 0);
+                if (matches != null && !matches.isEmpty() && matches.get(0).activityInfo != null) {
+                    ActivityInfo info = matches.get(0).activityInfo;
+                    intent = new Intent(Intent.ACTION_MAIN).setClassName(info.packageName, info.name)
+                            .addCategory("tv.ouya.intent.category.GAME");
+                }
+            }
+            if (intent == null) throw new IllegalStateException("No launch activity for " + entry.packageName);
+            rememberTab();
+            launchPending = true;
+            startActivity(intent);
+            handler.postDelayed(() -> launchPending = false, 1000);
+        } catch (Exception error) {
+            launchPending = false;
+            Log.w("OUYAlaunch", "Cannot launch " + entry.packageName, error);
+            Toast.makeText(this, R.string.launch_failed, Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    @Override public void onGenreChange(AppEntry requested) {
+        if (scanInProgress || preparingPage) return;
+        AppEntry entry = findEntry(requested);
+        if (entry == null) return;
+        int position = adapter.positionOf(entry.packageName);
+        String oldGenre = entry.genre;
+        int index = GENRES.indexOf(oldGenre);
+        int next = categories.nextAssignable(index);
+        if (next < 0) {
+            Toast.makeText(this, R.string.no_assignable_category, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (GENRES.get(next).equals(oldGenre)) return;
+        entry.genre = GENRES.get(next);
+        dirtyGenre(oldGenre);
+        dirtyGenre(entry.genre);
+        if (entry.favorite) tabDirty[0] = true;
+        saveApps();
+        refreshEntries(entry.packageName, position);
+    }
+
+    @Override public void onToggleFavorite(AppEntry requested) {
+        if (scanInProgress || preparingPage) return;
+        AppEntry entry = findEntry(requested);
+        if (entry == null) return;
+        int position = adapter.positionOf(entry.packageName);
+        entry.favorite = !entry.favorite;
+        tabDirty[0] = true;
+        saveApps();
+        if (currentTab == 0) refreshEntries(entry.packageName, position);
+    }
+
+    private void removeSelectedApp() {
+        if (scanInProgress || preparingPage) return;
+        AppEntry entry = findEntry(adapter.getSelectedApp());
+        if (entry == null) return;
+        int position = adapter.positionOf(entry.packageName);
+        allApps.remove(entry);
+        dirtyGenre(entry.genre);
+        tabDirty[0] = true;
+        saveApps();
+        refreshEntries(null, position);
+    }
+
+    @Override public boolean dispatchKeyEvent(KeyEvent event) {
+        int directionKey = event.getKeyCode();
+        if (!preparingPage && event.getAction() == KeyEvent.ACTION_DOWN
+                && (directionKey == KeyEvent.KEYCODE_DPAD_DOWN || directionKey == KeyEvent.KEYCODE_DPAD_UP
+                || directionKey == KeyEvent.KEYCODE_DPAD_LEFT || directionKey == KeyEvent.KEYCODE_DPAD_RIGHT)) {
+            // User navigation supersedes any posted focus restoration from a previous page.
+            ++focusGeneration;
+        }
+        int key = event.getKeyCode();
+        if (key == KeyEvent.KEYCODE_MENU || key == KeyEvent.KEYCODE_BUTTON_MODE || key == KeyEvent.KEYCODE_HOME) {
+            if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) showCategorySettings();
+            return true;
+        }
+        if (scanInProgress) return true;
+        if (preparingPage && key != KeyEvent.KEYCODE_BUTTON_L1 && key != KeyEvent.KEYCODE_BUTTON_R1) return true;
+        boolean down = event.getAction() == KeyEvent.ACTION_DOWN;
+        boolean up = event.getAction() == KeyEvent.ACTION_UP;
+        boolean first = down && event.getRepeatCount() == 0;
+        if (key == KeyEvent.KEYCODE_BUTTON_L1 || key == KeyEvent.KEYCODE_BUTTON_R1) {
+            if (first) selectTab(categories.neighbor(requestedTab >= 0 ? requestedTab : currentTab,
+                    key == KeyEvent.KEYCODE_BUTTON_L1 ? -1 : 1));
+            return true;
+        }
+        if (key == KeyEvent.KEYCODE_BUTTON_L2 || key == KeyEvent.KEYCODE_BUTTON_R2) {
+            if (down || up) {
+                if (key == KeyEvent.KEYCODE_BUTTON_L2) l2Pressed = down;
+                else r2Pressed = down;
+                if (first && l2Pressed && r2Pressed) {
+                    resetButtons();
+                    startLoading(true);
+                }
+            }
+            return true;
+        }
+        if (key == KeyEvent.KEYCODE_BUTTON_Y) {
+            if (first) { yPressed = true; yDownAt = SystemClock.uptimeMillis(); }
+            else if (up) {
+                boolean remove = yPressed && !event.isCanceled() && SystemClock.uptimeMillis() - yDownAt >= 2000;
+                yPressed = false;
+                if (remove) removeSelectedApp();
+            }
+            return true;
+        }
+        return super.dispatchKeyEvent(event);
+    }
+
+    private void resetButtons() { l2Pressed = false; r2Pressed = false; yPressed = false; }
+
+    private void updateNetworkIcon() {
+        int icon = R.drawable.ic_offline;
+        try {
+            ConnectivityManager manager = (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
+            if (manager != null) {
+                NetworkInfo lan = manager.getNetworkInfo(ConnectivityManager.TYPE_ETHERNET);
+                NetworkInfo wifi = manager.getNetworkInfo(ConnectivityManager.TYPE_WIFI);
+                if (lan != null && lan.isConnected()) icon = R.drawable.ic_lan;
+                else if (wifi != null && wifi.isConnected()) {
+                    WifiManager wm = (WifiManager) getApplicationContext().getSystemService(WIFI_SERVICE);
+                    WifiInfo info = wm == null ? null : wm.getConnectionInfo();
+                    int level = info == null ? 0 : WifiManager.calculateSignalLevel(info.getRssi(), WIFI_ICONS.length);
+                    icon = WIFI_ICONS[Math.max(0, Math.min(WIFI_ICONS.length - 1, level))];
+                }
+            }
+        } catch (RuntimeException error) { Log.w("OUYAlaunch", "Network status unavailable", error); }
+        if (icon != networkIcon) {
+            networkIcon = icon;
+            imgNetworkStatus.setImageResource(icon);
+            imgNetworkStatus.setRotation(0f);
+        }
+    }
+
+    @Override protected void onResume() {
+        super.onResume();
+        resumed = true;
+        launchPending = false;
+        resetButtons();
+        adapter.setImagesActive(true);
+        if (!scanInProgress && !preparingPage) {
+            if (loaded) restoreFocus(tabFocus[currentTab], Math.max(0, grid.findFirstVisibleItemPosition()));
+        }
+        refreshGenreNames(this);
+        if (showCategoriesOnResume) {
+            showCategoriesOnResume = false;
+            handler.post(this::showCategorySettings);
+        }
+        handler.removeCallbacks(networkUpdate);
+        networkUpdate.run();
+    }
+
+    @Override protected void onPause() {
+        resumed = false;
+        pausedAt = SystemClock.uptimeMillis();
+        stoppedSincePause = false;
+        resetButtons();
+        handler.removeCallbacks(networkUpdate);
+        if (loaded) rememberTab();
+        super.onPause();
+    }
+
+    @Override protected void onStop() {
+        stoppedSincePause = true;
+        adapter.setImagesActive(false);
+        super.onStop();
+    }
+
+    @Override public void onTrimMemory(int level) {
+        super.onTrimMemory(level);
+        // UI_HIDDEN alone is not memory pressure; it arrives on every game launch.
+        if (adapter != null && level != TRIM_MEMORY_UI_HIDDEN && level >= TRIM_MEMORY_RUNNING_LOW) {
+            adapter.trimMemory(level >= TRIM_MEMORY_RUNNING_CRITICAL);
+        }
+    }
+
+    @Override public void onLowMemory() {
+        super.onLowMemory();
+        if (adapter != null) adapter.trimMemory(true);
+    }
+
+    @Override protected void onSaveInstanceState(Bundle state) {
+        if (loaded) rememberTab();
+        state.putInt("tab", currentTab);
+        for (int i = 0; i < GENRES.size(); i++) {
+            state.putParcelable("scroll" + i, tabScroll[i]);
+            state.putString("focus" + i, tabFocus[i]);
+            state.putInt("first" + i, tabFirstVisible[i]);
+        }
+        super.onSaveInstanceState(state);
+    }
+
+    @Override protected void onDestroy() {
+        destroyed = true;
+        cancelPageReveal();
+        recycler.animate().cancel();
+        pageGeneration++;
+        if (categoryDialog != null) categoryDialog.dismiss();
+        handler.removeCallbacksAndMessages(null);
+        findViewById(android.R.id.content).animate().cancel();
+        adapter.close();
+        recycler.setAdapter(null);
+        super.onDestroy();
+    }
+
     private void ensureGridFitsFixedTiles(GridLayoutManager glm) {
         if (recycler == null || glm == null) return;
 
@@ -218,595 +720,4 @@ public class MainActivity extends AppCompatActivity implements AppAdapter.OnAppC
         recycler.requestLayout();
     }
 
-    private SharedPreferences launcherState() {
-        return getSharedPreferences(STATE_PREFS, MODE_PRIVATE);
-    }
-
-    private boolean hasPackageRescanPending() {
-        return launcherState().getBoolean(KEY_PACKAGE_RESCAN_PENDING, false);
-    }
-
-    private void clearPackageRescanPending() {
-        launcherState().edit().putBoolean(KEY_PACKAGE_RESCAN_PENDING, false).apply();
-    }
-
-    private void markScanFinished() {
-        launcherState().edit()
-                .putLong(KEY_LAST_SCAN_FINISHED_AT, System.currentTimeMillis())
-                .putBoolean(KEY_PACKAGE_RESCAN_PENDING, false)
-                .apply();
-    }
-
-    private void focusFirstTileIfNeeded() {
-        if (recycler == null) return;
-        recycler.post(new Runnable() {
-            @Override
-            public void run() {
-                if (recycler != null && recycler.getFocusedChild() == null && recycler.getChildCount() > 0) {
-                    recycler.getChildAt(0).requestFocus();
-                }
-            }
-        });
-    }
-
-    private boolean beginScanIfIdle(String reason) {
-        if (scanInProgress) {
-            Log.i("OUYAlaunch", "scan skipped, already running: " + reason);
-            return false;
-        }
-        scanInProgress = true;
-        Log.i("OUYAlaunch", "scan started: " + reason);
-        return true;
-    }
-
-    private void endScan(String reason) {
-        scanInProgress = false;
-        Log.i("OUYAlaunch", "scan finished: " + reason);
-    }
-
-    private void startInitialScanIfIdle() {
-        if (!beginScanIfIdle("initial-cache")) return;
-        new ScanTask().execute();
-    }
-
-    private void runPendingPackageRescanIfVisible() {
-        if (!hasPackageRescanPending()) return;
-        if (!dataStore.isCacheBuilt()) return;
-        if (isFinishing()) return;
-        if (scanInProgress) {
-            pendingForegroundRescan = true;
-            return;
-        }
-        Log.i("OUYAlaunch", "package changes pending - refreshing cache now");
-        rescanAppsPreserveGenres("package-change-on-resume");
-    }
-
-    private void schedulePendingPackageRescanIfNeeded() {
-        rescanHandler.removeCallbacks(foregroundPackageRescanRunnable);
-        if (hasPackageRescanPending()) {
-            Log.i("OUYAlaunch", "stale package rescan flag ignored; manual L2+R2 scan only");
-            clearPackageRescanPending();
-        }
-    }
-
-    private void setupTabs() {
-        tabContainer.removeAllViews();
-        LayoutInflater inflater = LayoutInflater.from(this);
-        for (int i = 0; i < GENRES.size(); i++) {
-            final int index = i;
-            TextView tv = (TextView) inflater.inflate(android.R.layout.simple_list_item_1, tabContainer, false);
-            tv.setText(GenreNames.getDisplayName(this, GENRES.get(i)));
-
-            // Anwenden des Styles aus styles.xml
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
-                tv.setTextAppearance(R.style.TabText);
-            } else {
-                tv.setTextAppearance(this, R.style.TabText);
-            }
-
-            tv.setPadding(32, 0, 32, 0);
-            tv.setSelected(i == currentTab);
-            tv.setOnClickListener(new View.OnClickListener() {
-                @Override public void onClick(View v) {
-                    selectTab(index);
-                }
-            });
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.MATCH_PARENT);
-            tv.setLayoutParams(lp);
-            tabContainer.addView(tv);
-        }
-        updateTabBackgrounds();
-    }
-
-    private void updateTabBackgrounds() {
-        for (int i = 0; i < tabContainer.getChildCount(); i++) {
-            View v = tabContainer.getChildAt(i);
-            v.setBackgroundColor(i == currentTab ? getResources().getColor(R.color.gray_selected) : 0x00000000);
-        }
-    }
-
-    private void selectTab(int index) {
-        currentTab = index;
-        updateTabBackgrounds();
-        adapter.setData(filterByCurrentTab(allApps));
-        recycler.post(() -> {
-            // Prüfen, ob überhaupt ein View fokussiert ist
-            if (recycler.getFocusedChild() == null && recycler.getChildCount() > 0) {
-                recycler.getChildAt(0).requestFocus();
-            }
-        });
-
-    }
-
-    private void initTabCacheIfNeeded() {
-        if (tabLists == null || tabDirty == null || tabDirty.length != GENRES.size()) {
-            tabLists = new ArrayList<>();
-            tabDirty = new boolean[GENRES.size()];
-            for (int i = 0; i < GENRES.size(); i++) {
-                tabLists.add(new ArrayList<>());
-                tabDirty[i] = true;
-            }
-        }
-    }
-
-    private void markAllTabsDirty() {
-        initTabCacheIfNeeded();
-        for (int i = 0; i < tabDirty.length; i++) {
-            tabDirty[i] = true;
-        }
-    }
-
-    private void rebuildTabList(int tabIndex) {
-        initTabCacheIfNeeded();
-        if (tabIndex < 0 || tabIndex >= GENRES.size()) return;
-
-        String genre = GENRES.get(tabIndex);
-        List<AppEntry> list = tabLists.get(tabIndex);
-        list.clear();
-
-        if (allApps == null) return;
-
-        for (AppEntry e : allApps) {
-            if ("Favorites".equals(genre)) {
-                if (e.favorite) list.add(e);
-            } else if (genre.equals(e.genre)) {
-                list.add(e);
-            }
-        }
-
-        if ("Favorites".equals(genre)) {
-            java.util.Collections.sort(list, new java.util.Comparator<AppEntry>() {
-                @Override
-                public int compare(AppEntry a, AppEntry b) {
-                    String ta = (a.title != null) ? a.title.toLowerCase() : "";
-                    String tb = (b.title != null) ? b.title.toLowerCase() : "";
-                    return ta.compareTo(tb);
-                }
-            });
-        }
-
-        tabDirty[tabIndex] = false;
-    }
-
-List<AppEntry> filterByCurrentTab(List<AppEntry> ignored) {
-        initTabCacheIfNeeded();
-
-        if (tabDirty[currentTab]) {
-            rebuildTabList(currentTab);
-        }
-
-        return tabLists.get(currentTab);
-    }
-
-
-
-    // ==============================
-    // NEU: Löschen-Funktion
-    // ==============================
-    private void removeAppFromLauncher(String packageName) {
-        List<AppEntry> updated = new ArrayList<>();
-
-        for (AppEntry app : allApps) {
-            if (!app.packageName.equals(packageName)) {
-                updated.add(app);
-            } else {
-                Log.i("RemoveApp", "App entfernt: " + app.title + " (" + app.packageName + ")");
-            }
-        }
-
-        allApps = updated;
-        markAllTabsDirty();
-        dataStore.save(allApps, true);
-        adapter.setData(filterByCurrentTab(allApps));
-        recycler.post(() -> {
-            // Prüfen, ob überhaupt ein View fokussiert ist
-            if (recycler.getFocusedChild() == null && recycler.getChildCount() > 0) {
-                recycler.getChildAt(0).requestFocus();
-            }
-        });
-
-    }
-
-    // ==============================
-    // NEU: Rescan-Funktion
-    // ==============================
-    private void rescanAppsPreserveGenres(String reason) {
-        if (!beginScanIfIdle(reason)) return;
-        new AsyncTask<Void, Void, List<AppEntry>>() {
-            @Override
-            protected void onPreExecute() {
-                if (overlayLoading != null) overlayLoading.setVisibility(View.VISIBLE);
-            }
-
-            @Override
-            protected List<AppEntry> doInBackground(Void... voids) {
-                List<AppEntry> existing = dataStore.load();
-                List<AppEntry> freshScan = AppScanner.buildCache(MainActivity.this);
-
-                // 1) Merge: nur neue Pakete hinzufügen, bestehende unverändert lassen
-                List<AppEntry> merged = new ArrayList<>(existing);
-                for (AppEntry n : freshScan) {
-                    boolean found = false;
-                    for (AppEntry o : existing) {
-                        if (o != null && n != null && o.packageName != null
-                                && o.packageName.equals(n.packageName)) {
-                            found = true;
-                            break;
-                        }
-                    }
-                    if (!found) merged.add(n);
-                }
-
-                // 2) Pro-Genre gruppieren (ohne putIfAbsent)
-                java.util.HashMap<String, List<AppEntry>> genreMap = new java.util.HashMap<>();
-                for (AppEntry e : merged) {
-                    if (e == null) continue;
-                    String g = (e.genre != null && e.genre.length() > 0) ? e.genre : "Casual";
-                    List<AppEntry> bucket = genreMap.get(g);
-                    if (bucket == null) {
-                        bucket = new ArrayList<>();
-                        genreMap.put(g, bucket);
-                    }
-                    bucket.add(e);
-                }
-
-                // 3) Null-sicherer Comparator (A–Z)
-                java.util.Comparator<AppEntry> byTitleAZ = new java.util.Comparator<AppEntry>() {
-                    @Override public int compare(AppEntry a, AppEntry b) {
-                        String ta = (a != null && a.title != null) ? a.title : "";
-                        String tb = (b != null && b.title != null) ? b.title : "";
-                        return ta.toLowerCase().compareTo(tb.toLowerCase());
-                    }
-                };
-
-                // 4) Innerhalb jedes Genres sortieren
-                for (List<AppEntry> list : genreMap.values()) {
-                    java.util.Collections.sort(list, byTitleAZ);
-                }
-
-                // 5) In feste Genre-Reihenfolge zurückführen
-                List<AppEntry> sortedMerged = new ArrayList<>();
-                for (String g : GENRES) {
-                    List<AppEntry> bucket = genreMap.get(g);
-                    if (bucket != null) sortedMerged.addAll(bucket);
-                }
-                // Apps mit unbekanntem Genre (falls vorhanden) ans Ende
-                for (java.util.Map.Entry<String, List<AppEntry>> e : genreMap.entrySet()) {
-                    if (!GENRES.contains(e.getKey())) {
-                        sortedMerged.addAll(e.getValue());
-                    }
-                }
-
-                dataStore.save(sortedMerged, true);
-                clearPackageRescanPending();
-                return sortedMerged;
-            }
-
-            @Override
-            protected void onPostExecute(List<AppEntry> result) {
-                try {
-                    if (overlayLoading != null) overlayLoading.setVisibility(View.GONE);
-                    if (result == null) {
-                        result = new ArrayList<>();
-                    }
-                    allApps = result;
-                    markAllTabsDirty();
-                    adapter.setData(filterByCurrentTab(allApps));
-                    markScanFinished();
-                    focusFirstTileIfNeeded();
-                } finally {
-                    endScan(reason);
-                    pendingForegroundRescan = false;
-                }
-
-            }
-        }.execute();
-    }
-
-
-private class ScanTask extends AsyncTask<Void, Void, List<AppEntry>> {
-    @Override
-    protected void onPreExecute() {
-        try {
-            overlayLoading.setVisibility(View.VISIBLE);
-        } catch (Throwable t) {
-            Log.e("ScanTask", "onPreExecute failed", t);
-        }
-    }
-
-    @Override
-    protected List<AppEntry> doInBackground(Void... voids) {
-        try {
-            return AppScanner.buildCache(MainActivity.this);
-        } catch (Throwable t) {
-            Log.e("ScanTask", "Error in background scan", t);
-            return new ArrayList<>();
-        }
-    }
-
-    @Override
-    protected void onPostExecute(List<AppEntry> appEntries) {
-        try {
-            if (overlayLoading != null)
-                overlayLoading.setVisibility(View.GONE);
-
-            if (appEntries == null) {
-                Log.w("ScanTask", "appEntries is null, creating empty list");
-                appEntries = new ArrayList<>();
-            }
-
-            dataStore.save(appEntries, true);
-            clearPackageRescanPending();
-
-            allApps = appEntries;
-            markAllTabsDirty();
-
-            if (adapter != null) {
-                adapter.setData(filterByCurrentTab(allApps));
-                markScanFinished();
-                focusFirstTileIfNeeded();
-
-            } else {
-                Log.w("ScanTask", "Adapter is null!");
-            }
-
-            Log.i("ScanTask", "Finished scanning, " + appEntries.size() + " apps found");
-
-        } catch (Throwable t) {
-            Log.e("ScanTask", "onPostExecute crash", t);
-        } finally {
-            endScan("initial-cache");
-            pendingForegroundRescan = false;
-        }
-    }
-}
-
-    @Override
-    public void onAppLaunch(AppEntry entry) {
-        try {
-            Intent launchIntent = getPackageManager().getLaunchIntentForPackage(entry.packageName);
-            if (launchIntent == null) {
-                Intent ouyaIntent = new Intent(Intent.ACTION_MAIN, null);
-                ouyaIntent.addCategory("tv.ouya.intent.category.GAME");
-                ouyaIntent.setPackage(entry.packageName);
-                java.util.List<android.content.pm.ResolveInfo> matches = getPackageManager().queryIntentActivities(ouyaIntent, 0);
-                if (matches != null && matches.size() > 0 && matches.get(0).activityInfo != null) {
-                    android.content.pm.ActivityInfo ai = matches.get(0).activityInfo;
-                    launchIntent = new Intent(Intent.ACTION_MAIN);
-                    launchIntent.setClassName(ai.packageName, ai.name);
-                    launchIntent.addCategory("tv.ouya.intent.category.GAME");
-                }
-            }
-            if (launchIntent != null) {
-                startActivity(launchIntent);
-            }
-        } catch (Exception ignored) {}
-    }
-
-    @Override
-    public void onGenreChange(AppEntry entry) {
-        int idx = GENRES.indexOf(entry.genre);
-        if (idx < 0) idx = 1;
-        idx++;
-        if (idx >= GENRES.size()) idx = 1; // skip favorites
-        entry.genre = GENRES.get(idx);
-        dataStore.saveOne(entry);
-        markAllTabsDirty();
-        adapter.setData(filterByCurrentTab(allApps));
-        recycler.post(() -> {
-            // Prüfen, ob überhaupt ein View fokussiert ist
-            if (recycler.getFocusedChild() == null && recycler.getChildCount() > 0) {
-                recycler.getChildAt(0).requestFocus();
-            }
-        });
-
-    }
-
-    @Override
-    public void onToggleFavorite(AppEntry entry) {
-        entry.favorite = !entry.favorite;
-        dataStore.saveOne(entry);
-        markAllTabsDirty();
-        if (currentTab == 0) adapter.setData(filterByCurrentTab(allApps));
-        recycler.post(() -> {
-            // Prüfen, ob überhaupt ein View fokussiert ist
-            if (recycler.getFocusedChild() == null && recycler.getChildCount() > 0) {
-                recycler.getChildAt(0).requestFocus();
-            }
-        });
-
-    }
-
-    @Override
-    public boolean dispatchKeyEvent(KeyEvent event) {
-        if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
-            int code = event.getKeyCode();
-            if (code == KeyEvent.KEYCODE_BUTTON_L1) {
-                selectTab(Math.max(0, currentTab - 1));
-                return true;
-            } else if (code == KeyEvent.KEYCODE_BUTTON_R1) {
-                selectTab(Math.min(GENRES.size() - 1, currentTab + 1));
-                return true;
-            }
-        }
-        return super.dispatchKeyEvent(event);
-    }
-
-
-    // ==============================
-    // NEU: L2 + R2 für Rescan
-    // ==============================
-    private boolean l2Pressed = false;
-    private boolean r2Pressed = false;
-
-    private long bButtonDownTime = 0;
-    private static final long LONG_PRESS_THRESHOLD = 2000; // in ms
-    private boolean bPressed = false;
-
-    @Override
-    public boolean onKeyDown(int keyCode, KeyEvent event) {
-        switch (keyCode) {
-            case KeyEvent.KEYCODE_BUTTON_L2:
-                l2Pressed = true;
-                if (r2Pressed && event.getRepeatCount() == 0) {
-                    Log.i("MainActivity", "L2 + R2 gedrückt – starte manuellen Scan");
-                    rescanAppsPreserveGenres("manual-l2-r2");
-                }
-                return true;
-            case KeyEvent.KEYCODE_BUTTON_R2:
-                r2Pressed = true;
-                if (l2Pressed && event.getRepeatCount() == 0) {
-                    Log.i("MainActivity", "L2 + R2 gedrückt – starte manuellen Scan");
-                    rescanAppsPreserveGenres("manual-l2-r2");
-                }
-                return true;
-            case KeyEvent.KEYCODE_BUTTON_Y:
-                if (!bPressed) { // verhindert Mehrfachauslösung
-                    bPressed = true;
-                    bButtonDownTime = System.currentTimeMillis();
-                }
-                return true;
-        }
-        return super.onKeyDown(keyCode, event);
-    }
-
-    @Override
-    public boolean onKeyUp(int keyCode, KeyEvent event) {
-        switch (keyCode) {
-            case KeyEvent.KEYCODE_BUTTON_L2:
-                l2Pressed = false;
-                return true;
-            case KeyEvent.KEYCODE_BUTTON_R2:
-                r2Pressed = false;
-                return true;
-            case KeyEvent.KEYCODE_BUTTON_Y:
-                long pressDuration = System.currentTimeMillis() - bButtonDownTime;
-                bPressed = false;
-                if (pressDuration >= LONG_PRESS_THRESHOLD) {
-                    AppEntry selected = adapter.getSelectedApp();
-                    if (selected != null) {
-                        removeAppFromLauncher(selected.packageName);
-                    }
-                } else {
-                    Log.i("MainActivity", "Kurzer Y-Druck – keine Aktion");
-                }
-                return true;
-
-        }
-        return super.onKeyUp(keyCode, event);
-    }
-
-
-
-    private void refreshTabTitles() {
-        // Refresh tab labels from GenreNames (JSON may have changed)
-        int n = Math.min(tabContainer.getChildCount(), GENRES.size());
-        for (int i = 0; i < n; i++) {
-            View v = tabContainer.getChildAt(i);
-            if (v instanceof TextView) {
-                ((TextView) v).setText(GenreNames.getDisplayName(this, GENRES.get(i)));
-            }
-        }
-    }
-
-    private boolean isWifiConnected() {
-        ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
-        if (cm == null) return false;
-        NetworkInfo wifiInfo = cm.getNetworkInfo(ConnectivityManager.TYPE_WIFI);
-        return wifiInfo != null && wifiInfo.isConnected();
-    }
-
-    private boolean isLanConnected() {
-        ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
-        if (cm == null) return false;
-        NetworkInfo lanInfo = cm.getNetworkInfo(ConnectivityManager.TYPE_ETHERNET);
-        return lanInfo != null && lanInfo.isConnected();
-    }
-
-    private int getWifiLevel0to4() {
-        WifiManager wifiManager = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
-        if (wifiManager == null) return 0;
-
-        WifiInfo info = wifiManager.getConnectionInfo();
-        if (info == null) return 0;
-
-        int rssi = info.getRssi();
-        int level = WifiManager.calculateSignalLevel(rssi, WIFI_ICONS.length);
-        if (level < 0) level = 0;
-        if (level >= WIFI_ICONS.length) level = WIFI_ICONS.length - 1;
-        return level;
-    }
-
-
-    private void applyNetworkIconTint() {
-        if (imgNetworkStatus != null) {
-            int color = Color.parseColor("#D8D9DC");
-            imgNetworkStatus.setColorFilter(color, PorterDuff.Mode.SRC_IN);
-        }
-    }
-
-
-    private void updateNetworkIcon() {
-        if (imgNetworkStatus == null) {
-            imgNetworkStatus = findViewById(R.id.imgNetworkStatus);
-        }
-        if (imgNetworkStatus == null) {
-            return;
-        }
-
-        if (isLanConnected()) {
-            imgNetworkStatus.setImageResource(R.drawable.ic_lan);
-        } else if (isWifiConnected()) {
-            int level = getWifiLevel0to4();
-            imgNetworkStatus.setImageResource(WIFI_ICONS[level]);
-        } else {
-            imgNetworkStatus.setImageResource(R.drawable.ic_offline);
-        }
-    }
-
-    @Override
-    protected void onPause() {
-        super.onPause();
-        // Timer stoppen, solange der Launcher nicht im Vordergrund ist
-        networkHandler.removeCallbacks(networkUpdateRunnable);
-        rescanHandler.removeCallbacks(foregroundPackageRescanRunnable);
-    }
-
-    @Override
-    protected void onResume() {
-        super.onResume();
-        // Reapply possible user changes to genre_names.json
-        refreshTabTitles();
-
-        // Sofort einmal aktualisieren
-        updateNetworkIcon();
-
-        // Sicherheitshalber alte Callbacks entfernen und dann neu starten
-        networkHandler.removeCallbacks(networkUpdateRunnable);
-        networkHandler.postDelayed(networkUpdateRunnable, NETWORK_UPDATE_INTERVAL_MS);
-
-        // Keine automatischen Package-Rescans beim Zurückkehren aus Spielen.
-        // Cache-Updates nur beim allerersten Start oder manuell per L2+R2.
-        schedulePendingPackageRescanIfNeeded();
-    }
 }
