@@ -5,6 +5,7 @@ import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.RectF;
+import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 
@@ -22,6 +23,43 @@ final class BitmapTools {
         InputStream stream = source.open();
         try { BitmapFactory.decodeStream(stream, null, bounds); }
         finally { stream.close(); }
+        return decodeWithBounds(source, bounds);
+    }
+
+    /**
+     * Cached previews are small PNGs written by AppScanner. Verify their IHDR in
+     * the same open stream instead of reopening the file for a bounds decode.
+     * Legacy/oversized/non-PNG files retain the safe two-pass downsampling path.
+     */
+    static Bitmap decodeCachedPreview(Source source) throws IOException {
+        BitmapFactory.Options bounds = new BitmapFactory.Options();
+        bounds.inJustDecodeBounds = true;
+        try (BufferedInputStream stream = new BufferedInputStream(source.open())) {
+            stream.mark(PreviewPngHeader.LENGTH);
+            byte[] header = new byte[PreviewPngHeader.LENGTH];
+            int read = 0;
+            while (read < header.length) {
+                int next = stream.read(header, read, header.length - read);
+                if (next < 0) break;
+                if (next == 0) {
+                    int single = stream.read();
+                    if (single < 0) break;
+                    header[read++] = (byte) single;
+                } else read += next;
+            }
+            stream.reset();
+            if (read == header.length && PreviewPngHeader.fits(header, WIDTH, HEIGHT)) {
+                BitmapFactory.Options options = new BitmapFactory.Options();
+                options.inPreferredConfig = Bitmap.Config.ARGB_8888;
+                return BitmapFactory.decodeStream(stream, null, options);
+            }
+            BitmapFactory.decodeStream(stream, null, bounds);
+        }
+        return decodeWithBounds(source, bounds);
+    }
+
+    private static Bitmap decodeWithBounds(Source source, BitmapFactory.Options bounds)
+            throws IOException {
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null;
         BitmapFactory.Options options = new BitmapFactory.Options();
         options.inPreferredConfig = Bitmap.Config.ARGB_8888;
@@ -30,7 +68,7 @@ final class BitmapTools {
                 && bounds.outHeight / (options.inSampleSize * 2) >= HEIGHT) {
             options.inSampleSize *= 2;
         }
-        stream = source.open();
+        InputStream stream = source.open();
         Bitmap decoded;
         try { decoded = BitmapFactory.decodeStream(stream, null, options); }
         finally { stream.close(); }

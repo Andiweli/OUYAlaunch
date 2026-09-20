@@ -13,11 +13,23 @@
     <string name="save_failed">Changes could not be saved. Please check free storage.</string>
     <string name="launch_failed">App could not be started. Check that its storage is connected.</string>
     <string name="categories_title">Categories</string>
-    <string name="categories_hint">Choose visible categories and edit their names. Hidden games keep their assignments. O/A: select or edit a name. B: cancel.</string>
+    <string name="categories_hint">Choose categories and edit their names. Hidden games keep their assignments.</string>
     <string name="category_required">At least one category must remain visible.</string>
     <string name="no_assignable_category">Enable a game category before assigning games.</string>
+    <string name="no_move_category">Enable another game category before moving this tile.</string>
+    <string name="move_genre_title">Move Genre</string>
+    <string name="move_genre_subtitle">Choose destination Genre</string>
+    <string name="confirm_delete_game">Game Tile will be deleted. OK?</string>
+    <string name="confirm_set_favorite">Game will be set as Favorite. OK?</string>
+    <string name="confirm_remove_favorite">Game will be removed from Favorites. OK?</string>
+    <string name="ok">OK</string>
     <string name="cancel">Cancel</string>
     <string name="save">Save</string>
     <string name="category_slot">Tab %1$d</string>
     <string name="app_author">by Andreas \'Andiweli\' Stürmer</string>
+    <string name="app_version">(Version %1$s)</string>
+    <string name="open_android_settings">Android settings</string>
+    <string name="open_apps_settings">Apps</string>
+    <string name="open_internet_settings">Internet settings</string>
+    <string name="settings_launch_failed">Settings could not be opened.</string>
 </resources>

@@ -7,8 +7,9 @@ android {
         applicationId "com.ast.ouyalaunch"
         minSdkVersion 16
         targetSdkVersion 34
-        versionCode 19
-        versionName "1.8.0"
+        // Keep these values until an explicit version bump is requested.
+        versionCode 20
+        versionName "1.9.0"
         vectorDrawables.useSupportLibrary = true
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }

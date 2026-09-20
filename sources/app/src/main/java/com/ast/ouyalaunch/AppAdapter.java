@@ -160,6 +160,13 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.VH> {
         prefetchDirection = direction;
         icons.prefetch(data, first, direction);
     }
+    public void prefetchPage(List<AppEntry> entries, int first, int count) {
+        icons.prefetchPage(entries, first, count);
+    }
+    public void cancelPrefetch() {
+        prefetchFirst = Integer.MIN_VALUE;
+        icons.cancelPrefetch();
+    }
     public void invalidateIcons() {
         prefetchFirst = Integer.MIN_VALUE;
         icons.invalidate();
@@ -169,11 +176,17 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.VH> {
         icons.prepare(entries, first, count, ready);
     }
     public void cancelPreparation() { icons.cancelPreparation(); }
-    public void setImagesActive(boolean active) {
+    public void setImagesActive(boolean active) { setImagesActive(active, true); }
+
+    // A resumed page is prepared as a unit before binding. Do not start decoding
+    // the old attached page first when a different destination was pending at stop.
+    void setImagesActive(boolean active, boolean reloadAttached) {
         imagesActive = active;
         icons.setPaused(!active);
-        if (active) { prefetchFirst = Integer.MIN_VALUE; reloadAttachedImages(); }
-        else for (VH holder : holders) {
+        if (active) {
+            prefetchFirst = Integer.MIN_VALUE;
+            if (reloadAttached) reloadAttachedImages();
+        } else for (VH holder : holders) {
             holder.itemView.animate().cancel();
             boolean focused = holder.itemView.hasFocus();
             holder.itemView.setScaleX(focused ? FOCUS_SCALE : NORMAL_SCALE);
@@ -187,6 +200,16 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.VH> {
             if (holder.itemView.getParent() != null && holder.path != null) icons.load(holder.img, holder.path);
         }
     }
+    /** Release attached, cached and pooled holders without losing their data/focus. */
+    public void releaseUiMemory() {
+        setImagesActive(false);
+        prefetchFirst = Integer.MIN_VALUE;
+        icons.releaseUiMemory();
+        // The weak registry includes holders outside recycler.getChildCount(),
+        // especially RecyclerView's offscreen cache and its recycled-view pool.
+        for (VH holder : holders) IconLoader.clear(holder.img);
+    }
+
     public void trimMemory(boolean severe) { icons.trim(severe); }
     public void close() {
         icons.close();

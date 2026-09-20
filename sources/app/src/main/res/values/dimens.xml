@@ -1,8 +1,17 @@
 <resources>
-    <dimen name="header_height_px">150px</dimen> <!-- Headergröße -->
+    <!-- The old shared logo/tab bar was 150 px high. -->
+    <dimen name="header_height_px">100px</dimen>
+    <dimen name="tabs_bar_height_px">@dimen/header_height_px</dimen>
+    <dimen name="header_divider_height_px">2px</dimen>
+    <!-- Original nodpi logo: 429 x 120 px; display at half size, without editing it. -->
+    <dimen name="header_logo_width_px">215px</dimen>
+    <dimen name="header_logo_height_px">60px</dimen>
+    <dimen name="header_action_width_px">100px</dimen>
     <dimen name="title_bar_height_px">50px</dimen> <!-- Höhe Tabs -->
     <dimen name="tab_right_padding">40dp</dimen>
-    <dimen name="grid_spacing_px">58px</dimen> <!-- vertikaler Abstand im Grid -->
+    <!-- The visible gap between both rows and columns, in physical pixels. -->
+    <dimen name="grid_spacing_px">40px</dimen>
+    <dimen name="grid_top_padding_px">6px</dimen>
     <!--
       Side margins/padding for the app grid.
       Use PX (not DP) on purpose so the 1080p layout stays consistent across devices

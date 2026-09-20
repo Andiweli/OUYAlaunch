@@ -28,6 +28,17 @@ public final class SlidingTabLayout extends LinearLayout {
         move(true);
     }
 
+    /** Stop hidden-frame work and leave the highlight at its selected destination. */
+    void finishAnimation() { move(false); }
+
+    /** Hide the tab marker while the controller is navigating the upper action bar. */
+    void clearSelection() {
+        if (motion != null) { motion.cancel(); motion = null; }
+        selected = -1;
+        positioned = false;
+        invalidate();
+    }
+
     private void move(boolean animate) {
         if (motion != null) { motion.cancel(); motion = null; }
         View target = selected >= 0 && selected < getChildCount() ? getChildAt(selected) : null;
