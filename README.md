@@ -38,9 +38,9 @@ It focuses on a clean, OUYA-styled UI, fast navigation with the OUYA controller 
   - Apps are organized into multiple tabs (Favorites + 6 genres).
   - By default, all newly detected apps land in the second tab **“Casual”**, so you can re-organize them at your own pace.
 
-- 🏷️ **Configurable genre names (JSON-based)**
-  - Rename the six genre tabs via a simple JSON config stored on the OUYA’s internal storage.
-  - No in-app settings screen needed — just edit the JSON file with a text editor or file manager.
+- 🏷️ **Configurable genre names**
+  - Rename all genre tabs via OUYA-button config overlay.
+  - You can de/select your needed tabs too!
 
 ---
 
