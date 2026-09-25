@@ -46,7 +46,9 @@ It focuses on a clean, OUYA-styled UI, fast navigation with the OUYA controller 
 
 ## 🖼 Screenshot
 
-![OUYAlaunch – favorites & genre tabs](https://github.com/user-attachments/assets/c7af91ad-d01c-4ac7-b2c8-02adfbe67a5d)
+![OUYAlaunch – favorites & genre tabs](https://github.com/user-attachments/assets/3970fbbf-0d41-4a02-a4bc-386e7c488619)
+
+![OUYAlaunch - edit genre tabs](https://github.com/user-attachments/assets/b32a6002-e6b5-4e94-a778-e9e555dd2dfa)
 
 ---
 
