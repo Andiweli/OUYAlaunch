@@ -71,13 +71,14 @@ OUYAlaunch does not have a classic “settings” menu.
 Instead, you control everything with the OUYA controller buttons:
 
 - **O** – Launch the selected app  
-- **U** – Move the selected app to the **next genre tab**  
-- **Y** – Delete an app (hold for ~2 seconds)  
+- **U** – Move the selected app to a selected genre tab 
+- **Y** – Delete an app
 - **A** – Mark / unmark an app as **Favorite**
 
 Navigation and global actions:
 
 - **L1 / R1** – Switch between tabs (Favorites + genre tabs)  
+- **L2 / R2** - Switch between gaming tabs and system tabs (new since 1.9.0)
 - **L2 + R2 (pressed together)** – Rescan all installed apps (rebuilds the cache)  
 - **D-Pad / Left stick / Right stick** – Move selection in the app grid  
 
@@ -85,7 +86,7 @@ Everything in the launcher can be reached using only the OUYA controller.
 
 ---
 
-## 🧩 Renaming genre tabs (JSON config)
+## 🧩 Renaming genre tabs (obsolete since 1.9.0)
 
 Since version **1.5+**, you can rename the six genre tabs using a JSON file created by the launcher on first scan.
 
